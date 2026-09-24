@@ -1,0 +1,10 @@
+{
+  "name":"media-rwanda",
+  "version":"3.2.1",
+  "private":true,
+  "description":"Rwanda Vibe Media - films, videos, music, photos, sports, entertainment and social feed",
+  "main":"server.js",
+  "scripts":{"start":"node server.js","dev":"node server.js"},
+  "engines":{"node":">=22.5.0"},
+  "dependencies":{"bcryptjs":"^3.0.2","express":"^5.1.0","jsonwebtoken":"^9.0.2","multer":"^2.0.2"}
+}

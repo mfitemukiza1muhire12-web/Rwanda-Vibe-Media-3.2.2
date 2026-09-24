@@ -1,0 +1,7 @@
+node_modules/
+media-rwanda.db
+media-rwanda.db-shm
+media-rwanda.db-wal
+uploads/*
+!.gitkeep
+.env
