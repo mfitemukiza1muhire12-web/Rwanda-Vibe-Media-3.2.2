@@ -250,5 +250,21 @@ app.patch('/api/admin/password',auth,admin,(req,res)=>{
 app.get('/robots.txt',(req,res)=>{res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /uploads/\nSitemap: /sitemap.xml\n`)});
 app.get('/sitemap.xml',(req,res)=>{const base=(process.env.SITE_URL||(`${req.protocol}://${req.get('host')}`)).replace(/\/$/,'');const rows=['/','/films','/videos','/music','/photos','/sports','/latest','/trending','/popular','/about','/contact','/privacy','/terms','/copyright','/content-policy'];const media=db.prepare("SELECT id,updated_at,created_at FROM media WHERE status='published' ORDER BY datetime(updated_at) DESC LIMIT 5000").all();const urls=rows.map(x=>`<url><loc>${base}${x}</loc></url>`).concat(media.map(x=>`<url><loc>${base}/media/${x.id}</loc><lastmod>${new Date(x.updated_at||x.created_at).toISOString()}</lastmod></url>`));res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join('')}</urlset>`)});
 app.get('/ads.txt',(req,res)=>res.type('text/plain').send('# MEDIA RWANDA - replace this comment with your real Google AdSense seller line after approval. Do not invent a publisher ID.\n'));
-app.use((req,res)=>{if(req.path.startsWith('/api/'))return res.status(404).json({error:'API route not found'});res.sendFile(path.join(ROOT,'public','index.html'))});
+app.use((req,res)=>{
+  if(req.path.startsWith('/api/')){
+    return res.status(404).json({error:'API route not found'});
+  }
+
+  const indexFile = path.join(ROOT,'index.html');
+
+  if(!fs.existsSync(indexFile)){
+    return res.status(500).send('Rwanda Vibe Media: index.html ntibonetse.');
+  }
+
+  res.sendFile(indexFile);
+});
+
+app.listen(PORT,()=>{
+  console.log(`MEDIA RWANDA running at http://localhost:${PORT}`);
+});
 app.listen(PORT,()=>console.log(`MEDIA RWANDA running at http://localhost:${PORT}`));
