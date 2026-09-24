@@ -1,6 +1,6 @@
 {
   "name":"media-rwanda",
-  "version":"3.2.1",
+  "version":"3.2.2",
   "private":true,
   "description":"Rwanda Vibe Media - films, videos, music, photos, sports, entertainment and social feed",
   "main":"server.js",
