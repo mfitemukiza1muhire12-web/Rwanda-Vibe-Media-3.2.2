@@ -62,7 +62,7 @@ if(!db.prepare('SELECT id FROM users WHERE email=?').get('admin@mediarwanda.com'
 
 app.use(express.json({limit:'3mb'}));
 app.use(express.urlencoded({extended:true}));
-app.use(express.static(path.join(ROOT,'public')));
+app.use(express.static(ROOT));
 app.use('/uploads',express.static(UP,{maxAge:'1d'}));
 
 const storage=multer.diskStorage({destination:(_,__,cb)=>cb(null,UP),filename:(_,file,cb)=>{
