@@ -60,7 +60,7 @@ if(!db.prepare('SELECT id FROM users WHERE email=?').get('admin@mediarwanda.com'
 
 app.use(express.json({limit:'3mb'}));
 app.use(express.urlencoded({extended:true}));
-app.use(express.static(path.join(ROOT,'public')));
+app.use(express.static(ROOT));
 app.use('/uploads',express.static(UP,{maxAge:'1d'}));
 
 const storage=multer.diskStorage({destination:(_,__,cb)=>cb(null,UP),filename:(_,file,cb)=>{
@@ -83,7 +83,12 @@ function postList(){return db.prepare(`SELECT p.*,u.name author,u.avatar author_
  FROM posts p JOIN users u ON u.id=p.user_id LEFT JOIN media m ON m.id=p.media_id ORDER BY p.created_at DESC LIMIT 100`).all()}
 function removeFile(name){if(name)try{fs.unlinkSync(path.join(UP,name))}catch{}}
 
-app.get('/api/health',(_,res)=>res.json({ok:true,app:'MEDIA RWANDA',version:'3.2.1',database:'SQLite'}));
+app.get('/api/health',(_,res)=>res.json({
+  ok:true,
+  app:'MEDIA RWANDA',
+  version:'3.2.2',
+  database:'SQLite'
+}));
 app.post('/api/register',(req,res)=>{const name=String(req.body.name||'').trim();const email=String(req.body.email||'').trim().toLowerCase();const password=String(req.body.password||'');if(name.length<2||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||password.length<6)return res.status(400).json({error:'Amazina, email nyayo na password yibura inyuguti 6 birakenewe'});try{const r=db.prepare('INSERT INTO users(name,email,password) VALUES(?,?,?)').run(name,email,bcrypt.hashSync(password,10));const u=safeUser(r.lastInsertRowid);res.json({token:jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role},SECRET,{expiresIn:'30d'}),user:u})}catch{res.status(409).json({error:'Iyo email isanzwe ikoreshwa'})}});
 app.post('/api/login',(req,res)=>{const email=String(req.body.email||'').trim().toLowerCase();const password=String(req.body.password||'');const u=db.prepare('SELECT * FROM users WHERE email=?').get(email);if(!u||!bcrypt.compareSync(password,u.password))return res.status(401).json({error:'Email cyangwa password si byo'});res.json({token:jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role},SECRET,{expiresIn:'30d'}),user:safeUser(u.id)})});
 app.get('/api/me',auth,(req,res)=>res.json(safeUser(req.user.id)));
@@ -242,5 +247,20 @@ app.patch('/api/admin/password',auth,admin,(req,res)=>{
 app.get('/robots.txt',(req,res)=>{res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /uploads/\nSitemap: /sitemap.xml\n`)});
 app.get('/sitemap.xml',(req,res)=>{const base=(process.env.SITE_URL||(`${req.protocol}://${req.get('host')}`)).replace(/\/$/,'');const rows=['/','/films','/videos','/music','/photos','/sports','/latest','/trending','/popular','/about','/contact','/privacy','/terms','/copyright','/content-policy'];const media=db.prepare("SELECT id,updated_at,created_at FROM media WHERE status='published' ORDER BY datetime(updated_at) DESC LIMIT 5000").all();const urls=rows.map(x=>`<url><loc>${base}${x}</loc></url>`).concat(media.map(x=>`<url><loc>${base}/media/${x.id}</loc><lastmod>${new Date(x.updated_at||x.created_at).toISOString()}</lastmod></url>`));res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join('')}</urlset>`)});
 app.get('/ads.txt',(req,res)=>res.type('text/plain').send('# MEDIA RWANDA - replace this comment with your real Google AdSense seller line after approval. Do not invent a publisher ID.\n'));
-app.use((req,res)=>{if(req.path.startsWith('/api/'))return res.status(404).json({error:'API route not found'});res.sendFile(path.join(ROOT,'public','index.html'))});
-app.listen(PORT,()=>console.log(`MEDIA RWANDA running at http://localhost:${PORT}`));
+app.use((req,res)=>{
+  if(req.path.startsWith('/api/')){
+    return res.status(404).json({error:'API route not found'});
+  }
+
+  const indexFile = path.join(ROOT,'index.html');
+
+  if(!fs.existsSync(indexFile)){
+    return res.status(500).send('Rwanda Vibe Media: index.html ntibonetse.');
+  }
+
+  res.sendFile(indexFile);
+});
+
+app.listen(PORT,()=>{
+  console.log(`MEDIA RWANDA running at http://localhost:${PORT}`);
+});
