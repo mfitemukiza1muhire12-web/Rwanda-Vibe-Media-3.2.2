@@ -53,10 +53,177 @@ function register(){shell(authCard('register'));location.hash='register'}
 async function doLogin(e){e.preventDefault();try{const d=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email.value,password:pass.value})});token=d.token;user=d.user;localStorage.setItem('mr_token',token);home()}catch(err){alert(err.message)}}
 async function doRegister(e){e.preventDefault();try{const d=await api('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});token=d.token;user=d.user;localStorage.setItem('mr_token',token);home()}catch(err){alert(err.message)}}
 function logout(){token='';user=null;localStorage.removeItem('mr_token');home()}
-function uploadPage(){if(!user)return login();shell(`<div class="formPage"><span class="eyebrow">CREATOR STUDIO</span><h1>＋ Upload Content</h1><p class="muted">Hitamo page/category aho content yawe igomba kugaragara. <b>Uploads z’abakoresha zibanza gusuzumwa na Admin</b> mbere yo gutangazwa.</p><form class="uploadForm" onsubmit="doUpload(event)"><input name="title" placeholder="Title / Izina rya content" required><textarea name="description" placeholder="Description"></textarea><select name="type" id="uploadType" onchange="syncUploadCategory()"><option value="film">🎬 Film</option><option value="video">▶ Video</option><option value="music">♫ Music</option><option value="photo">▧ Photo</option></select><select name="category" id="uploadCategory"><option value="normal">General</option><option value="gospel-video">🎤 Gospel Video</option><option value="gospel-audio">🎧 Gospel Audio</option><option value="comedy">😂 Comedy</option></select><div class="two"><input name="genre" placeholder="Genre"><input name="year" type="number" placeholder="Year"></div><label class="fileBox">📁 Hitamo file<input name="file" type="file" required></label><label class="fileBox">🖼️ Poster / Cover (optional)<input name="poster" type="file" accept="image/*"></label><label class="checkLine"><input type="checkbox" name="rights_confirm" required> Ndemeza ko mfite uburenganzira bwo gutangaza iyi content kandi ko itarimo content itemewe.</label><button class="bigBtn">Ohereza kuri review</button></form></div>`);location.hash='upload'}
-function syncUploadCategory(){const t=document.getElementById('uploadType'),c=document.getElementById('uploadCategory');if(!t||!c)return;for(const o of c.options){o.disabled=(o.value==='gospel-video'&&t.value!=='video')||(o.value==='gospel-audio'&&t.value!=='music')||(o.value==='comedy'&&t.value!=='video');}if(c.options[c.selectedIndex]?.disabled)c.value='normal';}
+function uploadPage(){
+  if(!user)return login();
 
-async function doUpload(e){e.preventDefault();try{await api('/api/media',{method:'POST',body:new FormData(e.target)});alert('Upload yakozwe neza 🎉');home()}catch(err){alert(err.message)}}
+  shell(`
+    <div class="formPage">
+      <span class="eyebrow">CREATOR STUDIO</span>
+
+      <h1>＋ Ohereza Content</h1>
+
+      <p class="muted">
+        Ohereza video, music cyangwa photo.
+        <b>Admin azabanza kuyisuzuma mbere y'uko ijya ku rubanda.</b>
+      </p>
+
+      <form class="uploadForm" onsubmit="doUpload(event)">
+
+        <input
+          name="title"
+          placeholder="Andika izina rya content"
+          required
+        >
+
+        <select
+          name="type"
+          id="uploadType"
+          onchange="syncUploadCategory()"
+          required
+        >
+          <option value="video">▶ Video</option>
+          <option value="music">♫ Music / Audio</option>
+          <option value="photo">▧ Photo</option>
+          <option value="film">🎬 Film</option>
+        </select>
+
+        <select
+          name="category"
+          id="uploadCategory"
+          required
+        >
+          <option value="normal">General</option>
+          <option value="gospel-video">🎤 Gospel Video</option>
+          <option value="gospel-audio">🎧 Gospel Audio</option>
+          <option value="comedy">😂 Comedy</option>
+        </select>
+
+        <textarea
+          name="description"
+          placeholder="Andika ibisobanuro bya content (optional)"
+          rows="3"
+        ></textarea>
+
+        <div class="two">
+          <input
+            name="genre"
+            placeholder="Genre (optional)"
+          >
+
+          <input
+            name="year"
+            type="number"
+            placeholder="Year (optional)"
+          >
+        </div>
+
+        <label class="fileBox">
+          📁 Hitamo Video / Audio / Photo
+          <input
+            name="file"
+            id="uploadFile"
+            type="file"
+            required
+            onchange="showUploadFileName(this)"
+          >
+          <small id="uploadFileName" class="muted">
+            Nta file wahisemo
+          </small>
+        </label>
+
+        <label class="fileBox">
+          🖼️ Poster / Cover
+          <input
+            name="poster"
+            type="file"
+            accept="image/*"
+          >
+          <small class="muted">
+            Optional
+          </small>
+        </label>
+
+        <label class="checkLine">
+          <input
+            type="checkbox"
+            name="rights_confirm"
+            required
+          >
+          Ndemeza ko mfite uburenganzira bwo gutangaza iyi content
+          kandi ko itarimo content itemewe.
+        </label>
+
+        <button
+          id="uploadSubmitBtn"
+          class="bigBtn"
+          type="submit"
+        >
+          🚀 Ohereza kuri Admin Review
+        </button>
+
+      </form>
+    </div>
+  `);
+
+  location.hash='upload';
+}
+function showUploadFileName(input){
+  const el=document.getElementById('uploadFileName');
+  if(!el)return;
+
+  const file=input.files?.[0];
+
+  if(file){
+    const size=(file.size/1024/1024).toFixed(2);
+    el.textContent=`✅ ${file.name} · ${size} MB`;
+  }else{
+    el.textContent='Nta file wahisemo';
+  }
+}
+
+async function doUpload(e){
+  e.preventDefault();
+
+  const form=e.target;
+  const btn=document.getElementById('uploadSubmitBtn');
+
+  if(btn){
+    btn.disabled=true;
+    btn.textContent='⏳ Birimo koherezwa...';
+  }
+
+  try{
+    const fd=new FormData(form);
+
+    const file=fd.get('file');
+
+    if(!file || !file.name){
+      throw Error('Banza uhitemo file.');
+    }
+
+    await api('/api/media',{
+      method:'POST',
+      body:fd
+    });
+
+    alert(
+      '✅ Content yawe yoherejwe neza!\n\n' +
+      'Yashyizwe kuri Admin Review. ' +
+      'Izatangazwa nyuma y’uko Admin ayemeje.'
+    );
+
+    home();
+
+  }catch(err){
+
+    alert('❌ Upload yanze:\n'+err.message);
+
+    if(btn){
+      btn.disabled=false;
+      btn.textContent='🚀 Ohereza kuri Admin Review';
+    }
+  }
+}
 async function social(){const posts=await api('/api/feed');shell(`<div class="pageTitle"><div><span class="eyebrow">FACEBOOK-STYLE</span><h1>● Social Feed</h1><p class="muted">Sangiza abantu ibyo ukunda.</p></div>${user?'<button class="bigBtn" onclick="newPost()">＋ Post</button>':''}</div><div class="feed">${posts.map(postCard).join('')||'<div class="empty">Nta post irimo. Ba uwa mbere!</div>'}</div>`);location.hash='social'}
 function postCard(p){let m=p.media_filename?(p.media_type==='photo'?`<img class="postMedia" src="/uploads/${esc(p.media_filename)}">`:`<video class="postMedia" src="/uploads/${esc(p.media_filename)}" controls></video>`):'';return `<article class="post"><div class="postHead"><div class="avatar">${esc((p.author||'M')[0].toUpperCase())}</div><div><b>${esc(p.author)}</b><small> · ${new Date(p.created_at).toLocaleString()}</small></div></div><p>${esc(p.text)}</p>${m}<div class="postActions"><button onclick="postLike(${p.id})">❤️ ${p.likes}</button><button onclick="postComments(${p.id})">💬 ${p.comments}</button><button onclick="navigator.clipboard?.writeText(location.origin+'/#social');alert('Link yandukuwe')">↗ Sangiza</button></div></article>`}
 async function newPost(){if(!user)return login();shell(`<div class="formPage small"><h1>＋ Kora Post</h1><form class="uploadForm" onsubmit="doPost(event)"><textarea name="text" placeholder="Ni iki ushaka gusangiza abantu?" rows="5"></textarea><label class="fileBox">📷 Shyiraho Photo/Video (optional)<input name="file" type="file" accept="image/*,video/*"></label><button class="bigBtn">Publish Post</button></form></div>`);location.hash='new-post'}
