@@ -6,7 +6,19 @@ const jwt=require('jsonwebtoken');
 const multer=require('multer');
 const {S3Client,PutObjectCommand,DeleteObjectCommand}=require('@aws-sdk/client-s3');
 const {DatabaseSync}=require('node:sqlite');
+const UP=path.join(__dirname,'uploads');
+if(!fs.existsSync(UP))fs.mkdirSync(UP,{recursive:true});
 
+const upload=multer({
+  storage:multer.diskStorage({
+    destination:(req,file,cb)=>cb(null,UP),
+    filename:(req,file,cb)=>{
+      const safe=path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g,'_');
+      cb(null,Date.now()+'-'+safe);
+    }
+  }),
+  limits:{fileSize:1024*1024*1024}
+});
 const app=express();
 const PORT=Number(process.env.PORT||3000);
 const R2_ACCOUNT_ID=process.env.R2_ACCOUNT_ID||'';
