@@ -81,13 +81,6 @@ app.use(express.urlencoded({extended:true}));
 app.use(express.static(ROOT));
 app.use('/uploads',express.static(UP,{maxAge:'1d'}));
 
-const storage=multer.diskStorage({destination:(_,__,cb)=>cb(null,UP),filename:(_,file,cb)=>{
-  const ext=path.extname(file.originalname).toLowerCase();
-  const base=path.basename(file.originalname,ext).replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,70)||'media';
-  cb(null,`${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}${ext}`);
-}});
-const upload=multer({storage,limits:{fileSize:1024*1024*1024}});
-
 function auth(req,res,next){try{const h=req.headers.authorization||'';if(!h.startsWith('Bearer '))throw 0;req.user=jwt.verify(h.slice(7),SECRET);const u=db.prepare('SELECT id,role,disabled FROM users WHERE id=?').get(req.user.id);if(!u||u.disabled)throw 0;req.user.role=u.role;next()}catch{res.status(401).json({error:'Login required'})}}
 function admin(req,res,next){if(req.user?.role!=='admin')return res.status(403).json({error:'Admin only'});next()}
 function safeUser(id){return db.prepare('SELECT id,name,email,role,avatar,bio,created_at FROM users WHERE id=?').get(id)}
@@ -99,7 +92,33 @@ function postList(){return db.prepare(`SELECT p.*,u.name author,u.avatar author_
  (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) likes,
  (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id=p.id) comments
  FROM posts p JOIN users u ON u.id=p.user_id LEFT JOIN media m ON m.id=p.media_id ORDER BY p.created_at DESC LIMIT 100`).all()}
-function removeFile(name){if(name)try{fs.unlinkSync(path.join(UP,name))}catch{}}
+function removeFile(name){
+  if(name)try{fs.unlinkSync(path.join(UP,name))}catch{}
+}
+
+async function uploadToR2(file,key){
+  if(!r2) throw new Error('Cloudflare R2 ntabwo yateguwe neza');
+
+  await r2.send(new PutObjectCommand({
+    Bucket:R2_BUCKET_NAME,
+    Key:key,
+    Body:file.buffer,
+    ContentType:file.mimetype
+  }));
+
+  return key;
+}
+
+async function deleteFromR2(key){
+  if(!r2 || !key) return;
+
+  try{
+    await r2.send(new DeleteObjectCommand({
+      Bucket:R2_BUCKET_NAME,
+      Key:key
+    }));
+  }catch{}
+}
 
 app.get('/api/health',(_,res)=>res.json({ok:true,app:'MEDIA RWANDA',version:'3.2.2',database:'SQLite'}));
 app.post('/api/register',(req,res)=>{const name=String(req.body.name||'').trim();const email=String(req.body.email||'').trim().toLowerCase();const password=String(req.body.password||'');if(name.length<2||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||password.length<6)return res.status(400).json({error:'Amazina, email nyayo na password yibura inyuguti 6 birakenewe'});try{const r=db.prepare('INSERT INTO users(name,email,password) VALUES(?,?,?)').run(name,email,bcrypt.hashSync(password,10));const u=safeUser(r.lastInsertRowid);res.json({token:jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role},SECRET,{expiresIn:'30d'}),user:u})}catch{res.status(409).json({error:'Iyo email isanzwe ikoreshwa'})}});
@@ -117,7 +136,84 @@ app.get('/api/media/:id',(req,res)=>{const m=db.prepare(`SELECT m.*,u.name autho
 app.get('/api/media/:id/comments',(req,res)=>res.json(db.prepare('SELECT c.*,u.name FROM comments c JOIN users u ON u.id=c.user_id WHERE c.media_id=? ORDER BY c.created_at DESC').all(req.params.id)));
 app.post('/api/media/:id/comments',auth,(req,res)=>{const text=String(req.body.text||'').trim();if(!text)return res.status(400).json({error:'Comment ntishobora kuba ubusa'});db.prepare('INSERT INTO comments(media_id,user_id,text) VALUES(?,?,?)').run(req.params.id,req.user.id,text.slice(0,1000));res.json({ok:true})});
 app.post('/api/media/:id/like',auth,(req,res)=>{const x=db.prepare('SELECT id FROM likes WHERE media_id=? AND user_id=?').get(req.params.id,req.user.id);if(x)db.prepare('DELETE FROM likes WHERE id=?').run(x.id);else db.prepare('INSERT OR IGNORE INTO likes(media_id,user_id) VALUES(?,?)').run(req.params.id,req.user.id);res.json({liked:!x})});
-app.post('/api/media',auth,upload.fields([{name:'file',maxCount:1},{name:'poster',maxCount:1}]),(req,res)=>{const f=req.files?.file?.[0],p=req.files?.poster?.[0],b=req.body||{};const type=String(b.type||'');const category=String(b.category||'normal');if(category==='gospel-video'&&type!=='video')return res.status(400).json({error:'Gospel Video igomba kuba Video'});if(category==='gospel-audio'&&type!=='music')return res.status(400).json({error:'Gospel Audio igomba kuba Music'});if(category==='comedy'&&type!=='video')return res.status(400).json({error:'Comedy igomba kuba Video'});if(!f||!b.title||!['film','video','photo','music'].includes(type)){if(f)removeFile(f.filename);return res.status(400).json({error:'Title, type na file birakenewe'})}db.prepare("INSERT INTO media(title,description,type,genre,year,filename,poster,user_id,status,updated_at) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").run(String(b.title).trim().slice(0,200),String(b.description||'').slice(0,3000),type,String(category!=='normal'?category:(b.genre||'')).slice(0,100),b.year?Number(b.year):null,f.filename,p?.filename||'',req.user.id,'pending');const r=db.prepare('SELECT last_insert_rowid() id').get();res.json({ok:true,id:r.id})});
+app.post('/api/media',auth,upload.fields([{name:'file',maxCount:1},{name:'poster',maxCount:1}]),async(req,res)=>{
+  const f=req.files?.file?.[0];
+  const p=req.files?.poster?.[0];
+  const b=req.body||{};
+
+  const type=String(b.type||'');
+  const category=String(b.category||'normal');
+
+  if(category==='gospel-video'&&type!=='video')
+    return res.status(400).json({error:'Gospel Video igomba kuba Video'});
+
+  if(category==='gospel-audio'&&type!=='music')
+    return res.status(400).json({error:'Gospel Audio igomba kuba Music'});
+
+  if(category==='comedy'&&type!=='video')
+    return res.status(400).json({error:'Comedy igomba kuba Video'});
+
+  if(!f||!b.title||!['film','video','photo','music'].includes(type)){
+    return res.status(400).json({error:'Title, type na file birakenewe'});
+  }
+
+  const safeName=(original)=>{
+    const ext=path.extname(original).toLowerCase();
+    const base=path.basename(original,ext)
+      .replace(/[^a-zA-Z0-9_-]/g,'_')
+      .slice(0,70)||'media';
+
+    return `${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}${ext}`;
+  };
+
+  const fileKey=`media/${safeName(f.originalname)}`;
+  const posterKey=p?`posters/${safeName(p.originalname)}`:'';
+
+  try{
+    await uploadToR2(f,fileKey);
+
+    if(p){
+      await uploadToR2(p,posterKey);
+    }
+
+    const r=db.prepare(`
+      INSERT INTO media(
+        title,description,type,genre,year,filename,poster,
+        user_id,status,updated_at
+      )
+      VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+    `).run(
+      String(b.title).trim().slice(0,200),
+      String(b.description||'').slice(0,3000),
+      type,
+      String(category!=='normal'?category:(b.genre||'')).slice(0,100),
+      b.year?Number(b.year):null,
+      fileKey,
+      posterKey,
+      req.user.id,
+      'pending'
+    );
+
+    const id=r.lastInsertRowid;
+
+    res.json({
+      ok:true,
+      id,
+      status:'pending',
+      message:'Media yashyizwe muri Admin Review'
+    });
+
+  }catch(err){
+    console.error('R2 upload error:',err);
+
+    await deleteFromR2(fileKey);
+    if(posterKey) await deleteFromR2(posterKey);
+
+    res.status(500).json({
+      error:'Kubika media kuri Cloudflare R2 byanze'
+    });
+  }
+});
 app.put('/api/media/:id',auth,admin,upload.fields([{name:'file',maxCount:1},{name:'poster',maxCount:1}]),(req,res)=>{const m=db.prepare('SELECT * FROM media WHERE id=?').get(req.params.id);if(!m)return res.status(404).json({error:'Content ntibonetse'});const b=req.body||{},f=req.files?.file?.[0],p=req.files?.poster?.[0];const filename=f?.filename||m.filename,poster=p?.filename||m.poster;db.prepare('UPDATE media SET title=?,description=?,type=?,genre=?,year=?,filename=?,poster=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(String(b.title||m.title).slice(0,200),String(b.description??m.description).slice(0,3000),['film','video','photo','music'].includes(b.type)?b.type:m.type,String(b.genre??m.genre).slice(0,100),b.year?Number(b.year):m.year,filename,poster,m.id);if(f)removeFile(m.filename);if(p)removeFile(m.poster);res.json({ok:true})});
 app.delete('/api/media/:id',auth,admin,(req,res)=>{const m=db.prepare('SELECT filename,poster FROM media WHERE id=?').get(req.params.id);if(!m)return res.status(404).json({error:'Content ntibonetse'});db.prepare('DELETE FROM comments WHERE media_id=?').run(req.params.id);db.prepare('DELETE FROM likes WHERE media_id=?').run(req.params.id);db.prepare('DELETE FROM posts WHERE media_id=?').run(req.params.id);db.prepare('DELETE FROM media WHERE id=?').run(req.params.id);removeFile(m.filename);removeFile(m.poster);res.json({ok:true})});
 
