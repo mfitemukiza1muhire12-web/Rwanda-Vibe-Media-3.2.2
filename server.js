@@ -4,11 +4,27 @@ const fs=require('fs');
 const bcrypt=require('bcryptjs');
 const jwt=require('jsonwebtoken');
 const multer=require('multer');
+const {S3Client,PutObjectCommand,DeleteObjectCommand}=require('@aws-sdk/client-s3');
 const {DatabaseSync}=require('node:sqlite');
 
 const app=express();
 const PORT=Number(process.env.PORT||3000);
-const SECRET=process.env.JWT_SECRET||'MEDIA-RWANDA-change-this-secret-in-production';
+const R2_ACCOUNT_ID=process.env.R2_ACCOUNT_ID||'';
+const R2_ACCESS_KEY_ID=process.env.R2_ACCESS_KEY_ID||'';
+const R2_SECRET_ACCESS_KEY=process.env.R2_SECRET_ACCESS_KEY||'';
+const R2_BUCKET_NAME=process.env.R2_BUCKET_NAME||'rwanda-vibe-media';
+const R2_ENDPOINT=process.env.R2_ENDPOINT||`https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+
+const r2=(R2_ACCOUNT_ID&&R2_ACCESS_KEY_ID&&R2_SECRET_ACCESS_KEY)
+  ? new S3Client({
+      region:'auto',
+      endpoint:R2_ENDPOINT,
+      credentials:{
+        accessKeyId:R2_ACCESS_KEY_ID,
+        secretAccessKey:R2_SECRET_ACCESS_KEY
+      }
+    })
+  : null;
 const ROOT=__dirname;
 const UP=path.join(ROOT,'uploads');
 fs.mkdirSync(UP,{recursive:true});
