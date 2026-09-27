@@ -6,8 +6,6 @@ const jwt=require('jsonwebtoken');
 const multer=require('multer');
 const {S3Client,PutObjectCommand,DeleteObjectCommand}=require('@aws-sdk/client-s3');
 const {DatabaseSync}=require('node:sqlite');
-const UP=path.join(__dirname,'uploads');
-if(!fs.existsSync(UP))fs.mkdirSync(UP,{recursive:true});
 
 const upload=multer({
   storage:multer.diskStorage({
