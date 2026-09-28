@@ -10,8 +10,6 @@ const {DatabaseSync}=require('node:sqlite');
 const app=express();
 
 const PORT=Number(process.env.PORT||3000);
-
-// JWT Secret
 const SECRET=process.env.JWT_SECRET||'change-this-secret-in-production';
 
 const R2_ACCOUNT_ID=process.env.R2_ACCOUNT_ID||'';
