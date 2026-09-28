@@ -7,6 +7,8 @@ const multer=require('multer');
 const {S3Client,PutObjectCommand,DeleteObjectCommand}=require('@aws-sdk/client-s3');
 const {DatabaseSync}=require('node:sqlite');
 
+const app=express();
+
 const PORT=Number(process.env.PORT||3000);
 const SECRET=process.env.JWT_SECRET||'change-this-secret-in-production';
 
