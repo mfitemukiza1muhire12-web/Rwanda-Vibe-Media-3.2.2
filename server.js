@@ -7,15 +7,24 @@ const multer=require('multer');
 const {S3Client,PutObjectCommand,DeleteObjectCommand}=require('@aws-sdk/client-s3');
 const {DatabaseSync}=require('node:sqlite');
 
+const app=express();
+
+const PORT=Number(process.env.PORT||3000);
+
+// JWT Secret
+const SECRET=process.env.JWT_SECRET||'change-this-secret-in-production';
+
+const R2_ACCOUNT_ID=process.env.R2_ACCOUNT_ID||'';
+const R2_ACCESS_KEY_ID=process.env.R2_ACCESS_KEY_ID||'';
+const R2_SECRET_ACCESS_KEY=process.env.R2_SECRET_ACCESS_KEY||'';
+const R2_BUCKET_NAME=process.env.R2_BUCKET_NAME||'rwanda-vibe-media';
+const R2_ENDPOINT=process.env.R2_ENDPOINT||`https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+
 const upload=multer({
-  storage:multer.diskStorage({
-    destination:(req,file,cb)=>cb(null,UP),
-    filename:(req,file,cb)=>{
-      const safe=path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g,'_');
-      cb(null,Date.now()+'-'+safe);
-    }
-  }),
-  limits:{fileSize:1024*1024*1024}
+  storage:multer.memoryStorage(),
+  limits:{
+    fileSize:1024*1024*1024
+  }
 });
 const app=express();
 const PORT=Number(process.env.PORT||3000);
