@@ -368,7 +368,94 @@ app.post('/api/media',auth,upload.fields([{name:'file',maxCount:1},{name:'poster
     });
   }
 });
-app.put('/api/media/:id',auth,admin,upload.fields([{name:'file',maxCount:1},{name:'poster',maxCount:1}]),(req,res)=>{const m=db.prepare('SELECT * FROM media WHERE id=?').get(req.params.id);if(!m)return res.status(404).json({error:'Content ntibonetse'});const b=req.body||{},f=req.files?.file?.[0],p=req.files?.poster?.[0];const filename=f?.filename||m.filename,poster=p?.filename||m.poster;db.prepare('UPDATE media SET title=?,description=?,type=?,genre=?,year=?,filename=?,poster=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(String(b.title||m.title).slice(0,200),String(b.description??m.description).slice(0,3000),['film','video','photo','music'].includes(b.type)?b.type:m.type,String(b.genre??m.genre).slice(0,100),b.year?Number(b.year):m.year,filename,poster,m.id);if(f)removeFile(m.filename);if(p)removeFile(m.poster);res.json({ok:true})});
+app.put('/api/media/:id',auth,admin,upload.fields([{name:'file',maxCount:1},{name:'poster',maxCount:1}]),async(req,res)=>{
+  const id=Number(req.params.id);
+
+  const m=db.prepare('SELECT * FROM media WHERE id=?').get(id);
+
+  if(!m){
+    return res.status(404).json({
+      error:'Content ntibonetse'
+    });
+  }
+
+  const b=req.body||{};
+  const f=req.files?.file?.[0];
+  const p=req.files?.poster?.[0];
+
+  let newFileKey=m.filename;
+  let newPosterKey=m.poster;
+
+  try{
+    // Niba habonetse file nshya, yohereze muri R2
+    if(f){
+      newFileKey=`media/${makeSafeFileName(f.originalname)}`;
+      await uploadToR2(f,newFileKey);
+    }
+
+    // Niba habonetse poster nshya, yohereze muri R2
+    if(p){
+      newPosterKey=`posters/${makeSafeFileName(p.originalname)}`;
+      await uploadToR2(p,newPosterKey);
+    }
+
+    const newType=['film','video','photo','music'].includes(b.type)
+      ? b.type
+      : m.type;
+
+    db.prepare(`
+      UPDATE media
+      SET title=?,
+          description=?,
+          type=?,
+          genre=?,
+          year=?,
+          filename=?,
+          poster=?,
+          updated_at=CURRENT_TIMESTAMP
+      WHERE id=?
+    `).run(
+      String(b.title||m.title).trim().slice(0,200),
+      String(b.description??m.description).slice(0,3000),
+      newType,
+      String(b.genre??m.genre).slice(0,100),
+      b.year ? Number(b.year) : m.year,
+      newFileKey,
+      newPosterKey,
+      id
+    );
+
+    // File ya kera uyisibe muri R2 nyuma yo kubona nshya neza
+    if(f && m.filename){
+      await deleteFromR2(m.filename);
+    }
+
+    if(p && m.poster){
+      await deleteFromR2(m.poster);
+    }
+
+    res.json({
+      ok:true,
+      message:'Media yavuguruwe neza'
+    });
+
+  }catch(err){
+    console.error('R2 media update error:',err);
+
+    // Niba upload nshya yarakozwe ariko update ikanga, uyisibe
+    if(f && newFileKey!==m.filename){
+      await deleteFromR2(newFileKey);
+    }
+
+    if(p && newPosterKey!==m.poster){
+      await deleteFromR2(newPosterKey);
+    }
+
+    res.status(500).json({
+      error:'Kuvugurura media kuri Cloudflare R2 byanze'
+    });
+  }
+});
 app.delete('/api/media/:id',auth,admin,async(req,res)=>{
   const id=Number(req.params.id);
 
