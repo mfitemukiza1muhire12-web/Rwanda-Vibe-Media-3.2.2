@@ -17,6 +17,7 @@ const R2_ACCESS_KEY_ID=process.env.R2_ACCESS_KEY_ID||'';
 const R2_SECRET_ACCESS_KEY=process.env.R2_SECRET_ACCESS_KEY||'';
 const R2_BUCKET_NAME=process.env.R2_BUCKET_NAME||'rwanda-vibe-media';
 const R2_ENDPOINT=process.env.R2_ENDPOINT||`https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+const R2_PUBLIC_URL=String(process.env.R2_PUBLIC_URL||'').replace(/\/$/,'');
 
 const r2=(R2_ACCOUNT_ID&&R2_ACCESS_KEY_ID&&R2_SECRET_ACCESS_KEY)
   ? new S3Client({
@@ -95,11 +96,51 @@ app.use('/uploads',express.static(UP,{maxAge:'1d'}));
 function auth(req,res,next){try{const h=req.headers.authorization||'';if(!h.startsWith('Bearer '))throw 0;req.user=jwt.verify(h.slice(7),SECRET);const u=db.prepare('SELECT id,role,disabled FROM users WHERE id=?').get(req.user.id);if(!u||u.disabled)throw 0;req.user.role=u.role;next()}catch{res.status(401).json({error:'Login required'})}}
 function admin(req,res,next){if(req.user?.role!=='admin')return res.status(403).json({error:'Admin only'});next()}
 function safeUser(id){return db.prepare('SELECT id,name,email,role,avatar,bio,created_at FROM users WHERE id=?').get(id)}
-function mediaList(type){return db.prepare(`SELECT m.*,u.name author,u.avatar author_avatar,
+function mediaList(type){
+  const rows=db.prepare(`
+    SELECT m.*,u.name author,u.avatar author_avatar,
+      (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id) likes,
+      (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id) comments
+    FROM media m
+    LEFT JOIN users u ON u.id=m.user_id
+    ${type
+      ?"WHERE m.type=? AND m.status='published'"
+      :"WHERE m.status='published'"
+    }
+    ORDER BY datetime(m.created_at) DESC
+  `).all(...(type?[type]:[]));
+
+  return rows.map(m=>({
+    ...m,
+    filename:r2Url(m.filename),
+    poster:r2Url(m.poster)
+  }));
+}
  (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id) likes,
  (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id) comments
  FROM media m LEFT JOIN users u ON u.id=m.user_id ${type?'WHERE m.type=? AND m.status=\'published\'':'WHERE m.status=\'published\''} ORDER BY datetime(m.created_at) DESC`).all(...(type?[type]:[]))}
-function postList(){return db.prepare(`SELECT p.*,u.name author,u.avatar author_avatar,m.title media_title,m.type media_type,m.filename media_filename,m.poster media_poster,
+function postList(){
+  const rows=db.prepare(`
+    SELECT p.*,u.name author,u.avatar author_avatar,
+      m.title media_title,
+      m.type media_type,
+      m.filename media_filename,
+      m.poster media_poster,
+      (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) likes,
+      (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id=p.id) comments
+    FROM posts p
+    JOIN users u ON u.id=p.user_id
+    LEFT JOIN media m ON m.id=p.media_id
+    ORDER BY p.created_at DESC
+    LIMIT 100
+  `).all();
+
+  return rows.map(p=>({
+    ...p,
+    media_filename:r2Url(p.media_filename),
+    media_poster:r2Url(p.media_poster)
+  }));
+}
  (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) likes,
  (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id=p.id) comments
  FROM posts p JOIN users u ON u.id=p.user_id LEFT JOIN media m ON m.id=p.media_id ORDER BY p.created_at DESC LIMIT 100`).all()}
@@ -108,7 +149,15 @@ function removeFile(name){
 }
 
 async function uploadToR2(file,key){
-  if(!r2) throw new Error('Cloudflare R2 ntabwo yateguwe neza');
+  if(!r2){
+    throw new Error(
+      'Cloudflare R2 ntabwo yateguwe neza. Reba R2_ACCOUNT_ID, R2_ACCESS_KEY_ID na R2_SECRET_ACCESS_KEY.'
+    );
+  }
+
+  if(!file || !file.buffer){
+    throw new Error('File buffer ntibonetse');
+  }
 
   await r2.send(new PutObjectCommand({
     Bucket:R2_BUCKET_NAME,
@@ -119,6 +168,17 @@ async function uploadToR2(file,key){
 
   return key;
 }
+function r2Url(key){
+  if(!key) return '';
+  if(/^https?:\/\//i.test(key)) return key;
+
+  if(!R2_PUBLIC_URL){
+    return key;
+  }
+
+  return `${R2_PUBLIC_URL}/${String(key).replace(/^\/+/,'')}`;
+}
+
 function makeSafeFileName(original){
   const ext=path.extname(original).toLowerCase();
 
@@ -148,11 +208,89 @@ app.get('/api/users/:id',(req,res)=>{const u=safeUser(req.params.id);if(!u)retur
 app.post('/api/users/:id/follow',auth,(req,res)=>{const id=Number(req.params.id);if(id===req.user.id)return res.status(400).json({error:'Ntushobora kwifollowinga'});const x=db.prepare('SELECT id FROM follows WHERE follower_id=? AND following_id=?').get(req.user.id,id);if(x)db.prepare('DELETE FROM follows WHERE id=?').run(x.id);else db.prepare('INSERT OR IGNORE INTO follows(follower_id,following_id) VALUES(?,?)').run(req.user.id,id);res.json({following:!x})});
 
 app.get('/api/site/stats',(req,res)=>res.json({updated:new Date().toISOString(),published:db.prepare("SELECT COUNT(*) c FROM media WHERE status='published'").get().c}));
-app.get('/api/media/latest',(req,res)=>{const days=Math.max(1,Math.min(30,Number(req.query.days)||7));res.json(db.prepare("SELECT m.*,u.name author,u.avatar author_avatar,(SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,(SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments FROM media m LEFT JOIN users u ON u.id=m.user_id WHERE m.status='published' AND datetime(m.created_at)>=datetime('now',?) ORDER BY datetime(m.created_at) DESC LIMIT 100").all(`-${days} days`));});
-app.get('/api/media/section/:section',(req,res)=>{const section=String(req.params.section);const order=section==='popular'?'(m.views + (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id)*5) DESC, datetime(m.created_at) DESC':section==='trending'?'(m.views*2 + (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id)*5 + (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id)*3) DESC, datetime(m.created_at) DESC':'datetime(m.created_at) DESC';const where=section==='latest'?"m.status='published'":section==='old'?"m.status='published' AND datetime(m.created_at)<datetime('now','-30 days')":"m.status='published'";res.json(db.prepare(`SELECT m.*,u.name author,u.avatar author_avatar,(SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,(SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments FROM media m LEFT JOIN users u ON u.id=m.user_id WHERE ${where} ORDER BY ${order} LIMIT 100`).all());});
+app.get('/api/media/latest',(req,res)=>{
+  const days=Math.max(1,Math.min(30,Number(req.query.days)||7));
+
+  const rows=db.prepare(`
+    SELECT m.*,u.name author,u.avatar author_avatar,
+      (SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,
+      (SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments
+    FROM media m
+    LEFT JOIN users u ON u.id=m.user_id
+    WHERE m.status='published'
+      AND datetime(m.created_at)>=datetime('now',?)
+    ORDER BY datetime(m.created_at) DESC
+    LIMIT 100
+  `).all(`-${days} days`);
+
+  res.json(rows.map(m=>({
+    ...m,
+    filename:r2Url(m.filename),
+    poster:r2Url(m.poster)
+  })));
+});
+app.get('/api/media/section/:section',(req,res)=>{
+  const section=String(req.params.section);
+
+  const order=
+    section==='popular'
+      ? '(m.views + (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id)*5) DESC, datetime(m.created_at) DESC'
+      : section==='trending'
+        ? '(m.views*2 + (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id)*5 + (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id)*3) DESC, datetime(m.created_at) DESC'
+        : 'datetime(m.created_at) DESC';
+
+  const where=
+    section==='latest'
+      ? "m.status='published'"
+      : section==='old'
+        ? "m.status='published' AND datetime(m.created_at)<datetime('now','-30 days')"
+        : "m.status='published'";
+
+  const rows=db.prepare(`
+    SELECT m.*,u.name author,u.avatar author_avatar,
+      (SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,
+      (SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments
+    FROM media m
+    LEFT JOIN users u ON u.id=m.user_id
+    WHERE ${where}
+    ORDER BY ${order}
+    LIMIT 100
+  `).all();
+
+  res.json(rows.map(m=>({
+    ...m,
+    filename:r2Url(m.filename),
+    poster:r2Url(m.poster)
+  })));
+});
 app.get('/api/media/category/:category',(req,res)=>{const c=String(req.params.category);const allowed=['gospel-video','gospel-audio','comedy'];if(!allowed.includes(c))return res.status(400).json({error:'Category itemewe'});const rows=db.prepare(`SELECT m.*,u.name author,u.avatar author_avatar,(SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,(SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments FROM media m LEFT JOIN users u ON u.id=m.user_id WHERE m.status='published' AND m.genre=? ORDER BY datetime(m.created_at) DESC`).all(c);res.json(rows);});
 app.get('/api/media',(req,res)=>res.json(mediaList(['film','video','photo','music'].includes(req.query.type)?req.query.type:null)));
-app.get('/api/media/:id',(req,res)=>{const m=db.prepare(`SELECT m.*,u.name author,u.avatar author_avatar,(SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,(SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments FROM media m LEFT JOIN users u ON u.id=m.user_id WHERE m.id=? AND m.status='published'`).get(req.params.id);if(!m)return res.status(404).json({error:'Content ntibonetse'});db.prepare('UPDATE media SET views=views+1 WHERE id=?').run(req.params.id);res.json({...m,views:m.views+1})});
+app.get('/api/media/:id',(req,res)=>{
+  const m=db.prepare(`
+    SELECT m.*,u.name author,u.avatar author_avatar,
+      (SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,
+      (SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments
+    FROM media m
+    LEFT JOIN users u ON u.id=m.user_id
+    WHERE m.id=? AND m.status='published'
+  `).get(req.params.id);
+
+  if(!m){
+    return res.status(404).json({
+      error:'Content ntibonetse'
+    });
+  }
+
+  db.prepare('UPDATE media SET views=views+1 WHERE id=?')
+    .run(req.params.id);
+
+  res.json({
+    ...m,
+    filename:r2Url(m.filename),
+    poster:r2Url(m.poster),
+    views:m.views+1
+  });
+});
 app.get('/api/media/:id/comments',(req,res)=>res.json(db.prepare('SELECT c.*,u.name FROM comments c JOIN users u ON u.id=c.user_id WHERE c.media_id=? ORDER BY c.created_at DESC').all(req.params.id)));
 app.post('/api/media/:id/comments',auth,(req,res)=>{const text=String(req.body.text||'').trim();if(!text)return res.status(400).json({error:'Comment ntishobora kuba ubusa'});db.prepare('INSERT INTO comments(media_id,user_id,text) VALUES(?,?,?)').run(req.params.id,req.user.id,text.slice(0,1000));res.json({ok:true})});
 app.post('/api/media/:id/like',auth,(req,res)=>{const x=db.prepare('SELECT id FROM likes WHERE media_id=? AND user_id=?').get(req.params.id,req.user.id);if(x)db.prepare('DELETE FROM likes WHERE id=?').run(x.id);else db.prepare('INSERT OR IGNORE INTO likes(media_id,user_id) VALUES(?,?)').run(req.params.id,req.user.id);res.json({liked:!x})});
@@ -235,7 +373,42 @@ app.post('/api/media',auth,upload.fields([{name:'file',maxCount:1},{name:'poster
   }
 });
 app.put('/api/media/:id',auth,admin,upload.fields([{name:'file',maxCount:1},{name:'poster',maxCount:1}]),(req,res)=>{const m=db.prepare('SELECT * FROM media WHERE id=?').get(req.params.id);if(!m)return res.status(404).json({error:'Content ntibonetse'});const b=req.body||{},f=req.files?.file?.[0],p=req.files?.poster?.[0];const filename=f?.filename||m.filename,poster=p?.filename||m.poster;db.prepare('UPDATE media SET title=?,description=?,type=?,genre=?,year=?,filename=?,poster=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(String(b.title||m.title).slice(0,200),String(b.description??m.description).slice(0,3000),['film','video','photo','music'].includes(b.type)?b.type:m.type,String(b.genre??m.genre).slice(0,100),b.year?Number(b.year):m.year,filename,poster,m.id);if(f)removeFile(m.filename);if(p)removeFile(m.poster);res.json({ok:true})});
-app.delete('/api/media/:id',auth,admin,(req,res)=>{const m=db.prepare('SELECT filename,poster FROM media WHERE id=?').get(req.params.id);if(!m)return res.status(404).json({error:'Content ntibonetse'});db.prepare('DELETE FROM comments WHERE media_id=?').run(req.params.id);db.prepare('DELETE FROM likes WHERE media_id=?').run(req.params.id);db.prepare('DELETE FROM posts WHERE media_id=?').run(req.params.id);db.prepare('DELETE FROM media WHERE id=?').run(req.params.id);removeFile(m.filename);removeFile(m.poster);res.json({ok:true})});
+app.delete('/api/media/:id',auth,adminOnly,async(req,res)=>{
+  const id=Number(req.params.id);
+
+  const m=db.prepare('SELECT * FROM media WHERE id=?').get(id);
+
+  if(!m){
+    return res.status(404).json({
+      error:'Media ntiboneka'
+    });
+  }
+
+  try{
+    // Siba video/photo/music muri Cloudflare R2
+    await deleteFromR2(m.filename);
+
+    // Siba poster nayo niba ihari
+    if(m.poster){
+      await deleteFromR2(m.poster);
+    }
+
+    // Hanyuma usibe record muri SQLite
+    db.prepare('DELETE FROM media WHERE id=?').run(id);
+
+    res.json({
+      ok:true,
+      message:'Media yasibwe neza'
+    });
+
+  }catch(err){
+    console.error('Delete R2 error:',err);
+
+    return res.status(500).json({
+      error:'Kubura media muri Cloudflare R2 byanze'
+    });
+  }
+});
 
 
 // Private one-to-one chat: WhatsApp-style conversations backed by SQLite.
@@ -412,7 +585,36 @@ app.get('/api/live',(req,res)=>res.json(db.prepare('SELECT l.*,u.name host FROM 
 app.post('/api/live',auth,(req,res)=>{const title=String(req.body?.title||'').trim();if(!title)return res.status(400).json({error:'Live title irakenewe'});const status=['live','scheduled','ended'].includes(req.body?.status)?req.body.status:'scheduled';const r=db.prepare('INSERT INTO live_rooms(title,description,stream_url,status,host_id) VALUES(?,?,?,?,?)').run(title,String(req.body?.description||'').slice(0,2000),String(req.body?.stream_url||'').slice(0,500),status,req.user.id);res.json({ok:true,id:r.lastInsertRowid})});
 app.delete('/api/live/:id',auth,(req,res)=>{const l=db.prepare('SELECT * FROM live_rooms WHERE id=?').get(req.params.id);if(!l)return res.status(404).json({error:'Live ntibonetse'});if(l.host_id!==req.user.id&&req.user.role!=='admin')return res.status(403).json({error:'Not allowed'});db.prepare('DELETE FROM live_rooms WHERE id=?').run(req.params.id);res.json({ok:true})});
 
-app.get('/api/search',(req,res)=>{const q=String(req.query.q||'').trim();if(!q)return res.json([]);const like=`%${q}%`;res.json(db.prepare(`SELECT m.*,u.name author,(SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,(SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments FROM media m LEFT JOIN users u ON u.id=m.user_id WHERE m.status='published' AND (m.title LIKE ? OR m.description LIKE ? OR m.genre LIKE ? OR u.name LIKE ?) ORDER BY m.created_at DESC LIMIT 100`).all(like,like,like,like))});
+app.get('/api/search',(req,res)=>{
+  const q=String(req.query.q||'').trim();
+
+  if(!q) return res.json([]);
+
+  const like=`%${q}%`;
+
+  const rows=db.prepare(`
+    SELECT m.*,u.name author,
+      (SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,
+      (SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments
+    FROM media m
+    LEFT JOIN users u ON u.id=m.user_id
+    WHERE m.status='published'
+      AND (
+        m.title LIKE ?
+        OR m.description LIKE ?
+        OR m.genre LIKE ?
+        OR u.name LIKE ?
+      )
+    ORDER BY m.created_at DESC
+    LIMIT 100
+  `).all(like,like,like,like);
+
+  res.json(rows.map(m=>({
+    ...m,
+    filename:r2Url(m.filename),
+    poster:r2Url(m.poster)
+  })));
+});
 app.post('/api/media/:id/report',auth,(req,res)=>{const reason=String(req.body?.reason||'').trim();if(!reason)return res.status(400).json({error:'Impamvu irakenewe'});const m=db.prepare('SELECT id FROM media WHERE id=?').get(req.params.id);if(!m)return res.status(404).json({error:'Content ntibonetse'});db.prepare("INSERT INTO reports(media_id,user_id,reason,status) VALUES(?,?,?,'open')").run(req.params.id,req.user.id,reason.slice(0,500));res.json({ok:true});});
 app.post('/api/feed/:id/report',auth,(req,res)=>{const reason=String(req.body?.reason||'').trim();if(!reason)return res.status(400).json({error:'Impamvu irakenewe'});const post=db.prepare('SELECT id FROM posts WHERE id=?').get(req.params.id);if(!post)return res.status(404).json({error:'Post ntibonetse'});db.prepare("INSERT INTO reports(post_id,user_id,reason,status) VALUES(?,?,?,'open')").run(req.params.id,req.user.id,reason.slice(0,500));res.json({ok:true});});
 app.get('/api/admin/reports',auth,admin,(req,res)=>res.json(db.prepare("SELECT r.*,m.title media_title,p.text post_text,u.name reporter FROM reports r LEFT JOIN media m ON m.id=r.media_id LEFT JOIN posts p ON p.id=r.post_id JOIN users u ON u.id=r.user_id ORDER BY CASE r.status WHEN 'open' THEN 0 ELSE 1 END,r.created_at DESC").all()));
