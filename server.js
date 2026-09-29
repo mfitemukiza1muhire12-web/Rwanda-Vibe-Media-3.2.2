@@ -116,9 +116,7 @@ function mediaList(type){
     poster:r2Url(m.poster)
   }));
 }
- (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id) likes,
- (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id) comments
- FROM media m LEFT JOIN users u ON u.id=m.user_id ${type?'WHERE m.type=? AND m.status=\'published\'':'WHERE m.status=\'published\''} ORDER BY datetime(m.created_at) DESC`).all(...(type?[type]:[]))}
+ 
 function postList(){
   const rows=db.prepare(`
     SELECT p.*,u.name author,u.avatar author_avatar,
@@ -141,9 +139,7 @@ function postList(){
     media_poster:r2Url(p.media_poster)
   }));
 }
- (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) likes,
- (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id=p.id) comments
- FROM posts p JOIN users u ON u.id=p.user_id LEFT JOIN media m ON m.id=p.media_id ORDER BY p.created_at DESC LIMIT 100`).all()}
+
 function removeFile(name){
   if(name)try{fs.unlinkSync(path.join(UP,name))}catch{}
 }
@@ -373,7 +369,7 @@ app.post('/api/media',auth,upload.fields([{name:'file',maxCount:1},{name:'poster
   }
 });
 app.put('/api/media/:id',auth,admin,upload.fields([{name:'file',maxCount:1},{name:'poster',maxCount:1}]),(req,res)=>{const m=db.prepare('SELECT * FROM media WHERE id=?').get(req.params.id);if(!m)return res.status(404).json({error:'Content ntibonetse'});const b=req.body||{},f=req.files?.file?.[0],p=req.files?.poster?.[0];const filename=f?.filename||m.filename,poster=p?.filename||m.poster;db.prepare('UPDATE media SET title=?,description=?,type=?,genre=?,year=?,filename=?,poster=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(String(b.title||m.title).slice(0,200),String(b.description??m.description).slice(0,3000),['film','video','photo','music'].includes(b.type)?b.type:m.type,String(b.genre??m.genre).slice(0,100),b.year?Number(b.year):m.year,filename,poster,m.id);if(f)removeFile(m.filename);if(p)removeFile(m.poster);res.json({ok:true})});
-app.delete('/api/media/:id',auth,adminOnly,async(req,res)=>{
+app.delete('/api/media/:id',auth,admin,async(req,res)=>{
   const id=Number(req.params.id);
 
   const m=db.prepare('SELECT * FROM media WHERE id=?').get(id);
@@ -642,7 +638,7 @@ app.patch('/api/admin/users/:id/role',auth,admin,(req,res)=>{
   db.prepare('UPDATE users SET role=? WHERE id=?').run(role,id);
   res.json({ok:true});
 });
-app.delete('/api/admin/users/:id',auth,admin,(req,res)=>{
+app.delete('/api/admin/users/:id',auth,admin,async(req,res)=>{
   const id=Number(req.params.id);
   if(id===req.user.id) return res.status(400).json({error:'Ntushobora gusiba konti yawe uri gukoresha admin'});
   const u=db.prepare('SELECT id FROM users WHERE id=?').get(id);
@@ -655,8 +651,17 @@ app.delete('/api/admin/users/:id',auth,admin,(req,res)=>{
   db.prepare('DELETE FROM reports WHERE user_id=?').run(id);
   db.prepare('DELETE FROM posts WHERE user_id=?').run(id);
   db.prepare('DELETE FROM live_rooms WHERE host_id=?').run(id);
-  const files=db.prepare('SELECT filename,poster FROM media WHERE user_id=?').all(id);
-  for(const f of files){removeFile(f.filename);removeFile(f.poster)}
+  const files=db.prepare(
+  'SELECT filename,poster FROM media WHERE user_id=?'
+).all(id);
+
+for(const f of files){
+  await deleteFromR2(f.filename);
+
+  if(f.poster){
+    await deleteFromR2(f.poster);
+  }
+}
   db.prepare('DELETE FROM media WHERE user_id=?').run(id);
   db.prepare('DELETE FROM users WHERE id=?').run(id);
   res.json({ok:true});
