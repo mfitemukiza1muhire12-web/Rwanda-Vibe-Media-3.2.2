@@ -196,7 +196,24 @@ async function deleteFromR2(key){
   }catch{}
 }
 
-app.get('/api/health',(_,res)=>res.json({ok:true,app:'MEDIA RWANDA',version:'3.2.2',database:'SQLite'}));
+app.get('/api/health',(_,res)=>res.json({
+  ok:true,
+  app:'MEDIA RWANDA',
+  version:'3.2.2',
+  database:'SQLite'
+}));
+
+app.get('/api/r2-status',(req,res)=>{
+  res.json({
+    account_id:!!R2_ACCOUNT_ID,
+    access_key:!!R2_ACCESS_KEY_ID,
+    secret_key:!!R2_SECRET_ACCESS_KEY,
+    bucket:R2_BUCKET_NAME,
+    endpoint:R2_ENDPOINT,
+    public_url:R2_PUBLIC_URL,
+    r2_ready:!!r2
+  });
+});
 app.post('/api/register',(req,res)=>{const name=String(req.body.name||'').trim();const email=String(req.body.email||'').trim().toLowerCase();const password=String(req.body.password||'');if(name.length<2||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||password.length<6)return res.status(400).json({error:'Amazina, email nyayo na password yibura inyuguti 6 birakenewe'});try{const r=db.prepare('INSERT INTO users(name,email,password) VALUES(?,?,?)').run(name,email,bcrypt.hashSync(password,10));const u=safeUser(r.lastInsertRowid);res.json({token:jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role},SECRET,{expiresIn:'30d'}),user:u})}catch{res.status(409).json({error:'Iyo email isanzwe ikoreshwa'})}});
 app.post('/api/login',(req,res)=>{const email=String(req.body.email||'').trim().toLowerCase();const password=String(req.body.password||'');const u=db.prepare('SELECT * FROM users WHERE email=?').get(email);if(!u||!bcrypt.compareSync(password,u.password))return res.status(401).json({error:'Email cyangwa password si byo'});res.json({token:jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role},SECRET,{expiresIn:'30d'}),user:safeUser(u.id)})});
 app.get('/api/me',auth,(req,res)=>res.json(safeUser(req.user.id)));
@@ -259,7 +276,34 @@ app.get('/api/media/section/:section',(req,res)=>{
     poster:r2Url(m.poster)
   })));
 });
-app.get('/api/media/category/:category',(req,res)=>{const c=String(req.params.category);const allowed=['gospel-video','gospel-audio','comedy'];if(!allowed.includes(c))return res.status(400).json({error:'Category itemewe'});const rows=db.prepare(`SELECT m.*,u.name author,u.avatar author_avatar,(SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,(SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments FROM media m LEFT JOIN users u ON u.id=m.user_id WHERE m.status='published' AND m.genre=? ORDER BY datetime(m.created_at) DESC`).all(c);res.json(rows);});
+app.get('/api/media/category/:category',(req,res)=>{
+  const c=String(req.params.category);
+
+  const allowed=['gospel-video','gospel-audio','comedy'];
+
+  if(!allowed.includes(c)){
+    return res.status(400).json({
+      error:'Category itemewe'
+    });
+  }
+
+  const rows=db.prepare(`
+    SELECT m.*,u.name author,u.avatar author_avatar,
+      (SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,
+      (SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments
+    FROM media m
+    LEFT JOIN users u ON u.id=m.user_id
+    WHERE m.status='published'
+      AND m.genre=?
+    ORDER BY datetime(m.created_at) DESC
+  `).all(c);
+
+  res.json(rows.map(m=>({
+    ...m,
+    filename:r2Url(m.filename),
+    poster:r2Url(m.poster)
+  })));
+});
 app.get('/api/media',(req,res)=>res.json(mediaList(['film','video','photo','music'].includes(req.query.type)?req.query.type:null)));
 app.get('/api/media/:id',(req,res)=>{
   const m=db.prepare(`
@@ -712,10 +756,20 @@ app.get('/api/admin/users',auth,admin,(req,res)=>res.json(db.prepare(`SELECT u.i
 
 // Admin controls: full user/content management and admin password change
 app.get('/api/admin/media',auth,admin,(req,res)=>{
-  res.json(db.prepare(`SELECT m.*,u.name author,u.email author_email,
-    (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id) likes,
-    (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id) comments
-    FROM media m LEFT JOIN users u ON u.id=m.user_id ORDER BY datetime(m.created_at) DESC`).all());
+  const rows=db.prepare(`
+    SELECT m.*,u.name author,u.email author_email,
+      (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id) likes,
+      (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id) comments
+    FROM media m
+    LEFT JOIN users u ON u.id=m.user_id
+    ORDER BY datetime(m.created_at) DESC
+  `).all();
+
+  res.json(rows.map(m=>({
+    ...m,
+    filename:r2Url(m.filename),
+    poster:r2Url(m.poster)
+  })));
 });
 app.patch('/api/admin/users/:id/disabled',auth,admin,(req,res)=>{const id=Number(req.params.id),disabled=req.body?.disabled?1:0;if(id===req.user.id&&disabled)return res.status(400).json({error:'Ntushobora kwihagarika konti yawe uri gukoresha admin'});const r=db.prepare('UPDATE users SET disabled=? WHERE id=?').run(disabled,id);if(!r.changes)return res.status(404).json({error:'User ntabonetse'});res.json({ok:true,disabled:!!disabled})});
 app.patch('/api/admin/users/:id/role',auth,admin,(req,res)=>{
