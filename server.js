@@ -10,7 +10,7 @@ const {DatabaseSync}=require('node:sqlite');
 const app=express();
 
 const PORT=Number(process.env.PORT||3000);
-const SECRET=process.env.JWT_SECRET||'change-this-secret-in-production');
+const SECRET=process.env.JWT_SECRET||'change-this-secret-in-production';
 
 const R2_ACCOUNT_ID=process.env.R2_ACCOUNT_ID||'';
 const R2_ACCESS_KEY_ID=process.env.R2_ACCESS_KEY_ID||'';
@@ -118,6 +118,15 @@ async function uploadToR2(file,key){
   }));
 
   return key;
+}
+function makeSafeFileName(original){
+  const ext=path.extname(original).toLowerCase();
+
+  const base=path.basename(original,ext)
+    .replace(/[^a-zA-Z0-9_-]/g,'_')
+    .slice(0,70)||'media';
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}${ext}`;
 }
 
 async function deleteFromR2(key){
@@ -304,8 +313,97 @@ app.post('/api/chats/:id/read',auth,(req,res)=>{
   res.json({ok:true});
 });
 
-app.get('/api/feed',(req,res)=>res.json(postList()));
-app.post('/api/feed',auth,upload.single('file'),(req,res)=>{const text=String(req.body?.text||'').trim();let mediaId=null;if(req.file){const type=req.file.mimetype.startsWith('image/')?'photo':req.file.mimetype.startsWith('video/')?'video':null;if(!type){removeFile(req.file.filename);return res.status(400).json({error:'Post yemera Photo cyangwa Video'})}const r=db.prepare('INSERT INTO media(title,description,type,filename,user_id) VALUES(?,?,?,?,?)').run('Social Post',text.slice(0,500),type,req.file.filename,req.user.id);mediaId=r.lastInsertRowid}if(!text&&!mediaId)return res.status(400).json({error:'Andika post cyangwa shyiramo Photo/Video'});const p=db.prepare('INSERT INTO posts(user_id,text,media_id) VALUES(?,?,?)').run(req.user.id,text.slice(0,3000),mediaId);res.json({ok:true,id:p.lastInsertRowid})});
+app.get('/api/feed',(req,res)=>{
+  res.json(postList());
+});
+
+app.post('/api/feed',auth,upload.single('file'),async(req,res)=>{
+  const text=String(req.body?.text||'').trim();
+  const f=req.file;
+
+  if(!text && !f){
+    return res.status(400).json({
+      error:'Andika post cyangwa shyiramo Photo/Video'
+    });
+  }
+
+  let mediaId=null;
+  let fileKey='';
+
+  try{
+    if(f){
+      const isImage=f.mimetype.startsWith('image/');
+      const isVideo=f.mimetype.startsWith('video/');
+
+      if(!isImage && !isVideo){
+        return res.status(400).json({
+          error:'Social Feed yemera Photo cyangwa Video gusa'
+        });
+      }
+
+      const type=isImage?'photo':'video';
+
+      // Bika file muri Cloudflare R2
+      fileKey=`social-feed/${makeSafeFileName(f.originalname)}`;
+
+      await uploadToR2(f,fileKey);
+
+      // Social Feed media igomba guhita iba published
+      const r=db.prepare(`
+        INSERT INTO media(
+          title,
+          description,
+          type,
+          genre,
+          filename,
+          poster,
+          user_id,
+          status,
+          updated_at
+        )
+        VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+      `).run(
+        'Social Post',
+        text.slice(0,500),
+        type,
+        'social-feed',
+        fileKey,
+        '',
+        req.user.id,
+        'published'
+      );
+
+      mediaId=r.lastInsertRowid;
+    }
+
+    const p=db.prepare(`
+      INSERT INTO posts(user_id,text,media_id)
+      VALUES(?,?,?)
+    `).run(
+      req.user.id,
+      text.slice(0,3000),
+      mediaId
+    );
+
+    res.json({
+      ok:true,
+      id:p.lastInsertRowid,
+      mediaId,
+      message:'Post yashyizwe muri Social Feed'
+    });
+
+  }catch(err){
+    console.error('Social Feed upload error:',err);
+
+    if(fileKey){
+      await deleteFromR2(fileKey);
+    }
+
+    res.status(500).json({
+      error:'Social Feed upload yanze'
+    });
+  }
+});
 app.post('/api/feed/:id/like',auth,(req,res)=>{const x=db.prepare('SELECT id FROM post_likes WHERE post_id=? AND user_id=?').get(req.params.id,req.user.id);if(x)db.prepare('DELETE FROM post_likes WHERE id=?').run(x.id);else db.prepare('INSERT OR IGNORE INTO post_likes(post_id,user_id) VALUES(?,?)').run(req.params.id,req.user.id);res.json({liked:!x})});
 app.get('/api/feed/:id/comments',(req,res)=>res.json(db.prepare('SELECT c.*,u.name FROM post_comments c JOIN users u ON u.id=c.user_id WHERE post_id=? ORDER BY c.created_at DESC').all(req.params.id)));
 app.post('/api/feed/:id/comments',auth,(req,res)=>{const text=String(req.body?.text||'').trim();if(!text)return res.status(400).json({error:'Comment ntishobora kuba ubusa'});db.prepare('INSERT INTO post_comments(post_id,user_id,text) VALUES(?,?,?)').run(req.params.id,req.user.id,text.slice(0,1000));res.json({ok:true})});
