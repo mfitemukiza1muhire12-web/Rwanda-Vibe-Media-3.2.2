@@ -1,6 +1,25 @@
 const app=document.getElementById('app');
 let token=localStorage.getItem('mr_token')||'',user=null,media=[],query='';
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+
+function mediaUrl(value){
+  if(!value)return '';
+
+  const s=String(value).trim();
+
+  // R2 URL yuzuye
+  if(/^https?:\/\//i.test(s)){
+    return s;
+  }
+
+  // Local uploads URL
+  if(s.startsWith('/uploads/')){
+    return s;
+  }
+
+  // Local file
+  return '/uploads/'+s.replace(/^\/+/,'');
+}
 async function api(url,opt={}){opt.headers=opt.headers||{};if(token)opt.headers.Authorization='Bearer '+token;const r=await fetch(url,opt);const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Habaye ikibazo');return d}
 function side(id,ico,label){return `<button class="navItem ${location.hash==='#'+id?'active':''}" onclick="page('${id}')"><b>${ico}</b><span>${label}</span></button>`}
 
@@ -28,7 +47,21 @@ async function load(type=''){media=await api('/api/media'+(type?'?type='+type:''
 function dateLabel(d){const t=new Date(d);if(Number.isNaN(t.getTime()))return '';const now=new Date(),diff=Math.max(0,now-t),day=86400000;if(diff<day)return 'NSHYA';if(diff<2*day)return 'EJO';if(diff<7*day)return 'IKI CYUMWERU';return t.toLocaleDateString('rw-RW',{day:'2-digit',month:'short',year:'numeric'});}
 function dateTime(d){const t=new Date(d);return Number.isNaN(t.getTime())?'':t.toLocaleString('rw-RW',{dateStyle:'medium',timeStyle:'short'});}
 function footer(){return `<footer class="siteFooter"><div><b>RWANDA VIBE MEDIA</b><p>Urubuga rw’ibirimo bya siporo, imyidagaduro, Films, Videos, Music, Photos na Social Feed.</p></div><div class="footerLinks"><button onclick="page('about')">About Us</button><button onclick="page('contact')">Contact</button><button onclick="page('privacy')">Privacy Policy</button><button onclick="page('terms')">Terms</button><button onclick="page('copyright')">Copyright</button><button onclick="page('content-policy')">Content Policy</button></div><small>© ${new Date().getFullYear()} MEDIA RWANDA · Content rights belong to their respective owners.</small></footer>`;}
-function thumb(x){if(x.poster)return `<img class="thumb" src="/uploads/${esc(x.poster)}" loading="lazy">`;if(x.type==='photo')return `<img class="thumb" src="/uploads/${esc(x.filename)}" loading="lazy">`;if(x.type==='video'||x.type==='film')return `<video class="thumb" src="/uploads/${esc(x.filename)}" muted preload="metadata"></video>`;return `<div class="musicThumb"><span>♫</span><small>MUSIC</small></div>`}
+function thumb(x){
+  if(x.poster){
+    return `<img class="thumb" src="${esc(mediaUrl(x.poster))}" loading="lazy">`;
+  }
+
+  if(x.type==='photo'){
+    return `<img class="thumb" src="${esc(mediaUrl(x.filename))}" loading="lazy">`;
+  }
+
+  if(x.type==='video'||x.type==='film'){
+    return `<video class="thumb" src="${esc(mediaUrl(x.filename))}" muted preload="metadata"></video>`;
+  }
+
+  return `<div class="musicThumb"><span>♫</span><small>MUSIC</small></div>`;
+}
 function card(x){return `<article class="card"><div class="thumbWrap" onclick="openMedia(${x.id})">${thumb(x)}<span class="typeBadge">${x.type==='film'?'FILM':x.type.toUpperCase()}</span></div><div class="cardBody"><div class="author">${esc(x.author||'MEDIA RWANDA')} <span class="dateBadge">${dateLabel(x.created_at)}</span></div><h3>${esc(x.title)}</h3><p class="muted">${esc(x.genre||'')} ${x.year?'· '+x.year:''}</p><div class="actions"><button onclick="like(${x.id})">❤️ ${x.likes||0}</button><button onclick="openMedia(${x.id})">💬 ${x.comments||0}</button><button onclick="openMedia(${x.id})">▶ ${x.type==='music'?'Kumva':'Reba'}</button></div></div></article>`}
 function section(title,type,items=6){const xs=media.filter(x=>x.type===type).slice(0,items);return `<section><div class="sectionHead"><h2>${title}</h2><button class="linkBtn" onclick="page('${type==='film'?'films':type+'s'}')">Reba byose →</button></div><div class="grid">${xs.map(card).join('')||`<div class="empty">Nta ${type} irimo. Jya kuri Upload wongereho content.</div>`}</div></section>`}
 async function home(){query='';await load();const latest=await api('/api/media/section/latest');const trending=await api('/api/media/section/trending');const popular=await api('/api/media/section/popular');shell(`<div class="hero"><div><span class="eyebrow">🇷🇼 RWANDA · ENTERTAINMENT · SOCIAL</span><h1>Reba. Sangiza. Menya.</h1><p>Films, Videos, Music, Photos, Shorts, Live na Social Feed ahantu hamwe. <b>Nta login ikenewe kugira ngo urebe.</b></p><div><button class="bigBtn" onclick="page('latest')">🆕 Reba bishya</button><button class="outlineBtn" onclick="page('tiktok')">📱 Reba Shorts</button></div></div></div><div class="quick"><button onclick="page('latest')">🆕 Latest</button><button onclick="page('trending')">🔥 Trending</button><button onclick="page('popular')">⭐ Popular</button><button onclick="page('films')">🎬 Films</button><button onclick="page('videos')">▶ Videos</button><button onclick="page('music')">♫ Music</button><button onclick="page('photos')">▧ Photos</button><button onclick="page('gospel-video')">🎤 Gospel Video</button><button onclick="page('gospel-audio')">🎧 Gospel Audio</button><button onclick="page('comedy')">😂 Comedy</button><button onclick="page('sports')">🏆 Siporo & Imyidagaduro</button></div><section><div class="sectionHead"><h2>🆕 Bishya</h2><button class="linkBtn" onclick="page('latest')">Reba byose →</button></div><div class="grid">${latest.slice(0,8).map(card).join('')||'<div class="empty">Nta content nshya irimo.</div>'}</div></section><section><div class="sectionHead"><h2>🔥 Trending</h2><button class="linkBtn" onclick="page('trending')">Reba byose →</button></div><div class="grid">${trending.slice(0,8).map(card).join('')||'<div class="empty">Nta trending content irimo.</div>'}</div></section><section><div class="sectionHead"><h2>⭐ Popular</h2><button class="linkBtn" onclick="page('popular')">Reba byose →</button></div><div class="grid">${popular.slice(0,8).map(card).join('')||'<div class="empty">Nta popular content irimo.</div>'}</div></section>${section('🎬 Films zigezweho','film')}${section('▶ Videos zigezweho','video')}${section('▧ Amafoto mashya','photo')}${section('♫ Music','music')}`);location.hash='home'}
@@ -44,7 +77,11 @@ async function sportsPage(){
  location.hash='sports';
 }
 async function collection(p){const t={films:'film',videos:'video',photos:'photo',music:'music','gospel-video':'video','gospel-audio':'music',comedy:'video'}[p];if(['gospel-video','gospel-audio','comedy'].includes(p))media=await api('/api/media/category/'+p);else await load(t);const titles={films:'🎬 Films',videos:'▶ Videos',photos:'▧ Photos',music:'♫ Music','gospel-video':'🎤 Gospel Video','gospel-audio':'🎧 Gospel Audio',comedy:'😂 Comedy'};shell(`<div class="pageTitle"><div><span class="eyebrow">MEDIA RWANDA</span><h1>${titles[p]}</h1><p class="muted">Reba nta login. Abakoresha bashobora gushyira content kuri page ihuye n'icyiciro bahisemo muri Upload.</p></div><span class="count">${media.length} items</span></div><div class="grid">${media.map(card).join('')||'<div class="empty">Nta content irimo muri iyi page. Jya kuri Upload uhitemo category yayo.</div>'}</div>`);location.hash=p}
-async function openMedia(id){const x=await api('/api/media/'+id),comments=await api('/api/media/'+id+'/comments');let player=x.type==='music'?`<audio controls autoplay class="audio" src="/uploads/${esc(x.filename)}"></audio>`:x.type==='photo'?`<img class="detailPhoto" src="/uploads/${esc(x.filename)}">`:`<video controls autoplay class="detailVideo" src="/uploads/${esc(x.filename)}"></video>`;shell(`<button class="backBtn" onclick="page('${x.type==='film'?'films':x.type==='video'?'videos':x.type==='photo'?'photos':'music'}')">← Subira</button><article class="detail"><div class="detailMedia">${player}</div><div class="detailInfo"><span class="typeBadge static">${x.type.toUpperCase()}</span><h1>${esc(x.title)}</h1><p class="muted">By ${esc(x.author||'MEDIA RWANDA')} · ${x.views} views · ${x.year||''}</p><p>${esc(x.description||'')}</p><div class="detailActions"><button class="bigAction" onclick="like(${x.id})">❤️ ${x.likes}</button><button class="bigAction">💬 ${x.comments}</button></div><h2>Comments</h2>${user?`<form class="commentForm" onsubmit="comment(event,${x.id})"><input id="commentText" placeholder="Andika comment..." required><button>Ohereza</button></form>`:'<button class="outlineBtn" onclick="page(\'login\')">🔐 Injira kugira ngo usige comment</button>'}<div>${comments.map(c=>`<div class="commentLine"><b>${esc(c.name)}</b><br>${esc(c.text)}</div>`).join('')||'<p class="muted">Nta comment iraboneka.</p>'}</div></div></article>`);location.hash='media-'+id}
+let player=x.type==='music'
+  ? `<audio controls autoplay class="audio" src="${esc(mediaUrl(x.filename))}"></audio>`
+  : x.type==='photo'
+    ? `<img class="detailPhoto" src="${esc(mediaUrl(x.filename))}">`
+    : `<video controls autoplay class="detailVideo" src="${esc(mediaUrl(x.filename))}"></video>`;
 async function like(id){if(!user){alert('Kanda Injira kugira ngo ukunde content. Ushobora kureba nta login.');return}try{await api('/api/media/'+id+'/like',{method:'POST'});openMedia(id)}catch(e){alert(e.message)}}
 async function comment(e,id){e.preventDefault();try{await api('/api/media/'+id+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:document.getElementById('commentText').value})});openMedia(id)}catch(err){alert(err.message)}}
 function authCard(mode='login'){return `<div class="authCard"><div class="authLogo">MR</div><h1>${mode==='login'?'Murakaza neza 👋':'Fungura konti yawe'}</h1><p class="muted">${mode==='login'?'Injira byoroshye.':'Kora konti mu masegonda make.'}</p>${mode==='login'?`<form onsubmit="doLogin(event)"><input id="email" type="email" autocomplete="email" placeholder="Email" required><input id="pass" type="password" autocomplete="current-password" placeholder="Password" required><button class="bigBtn full">Injira</button></form><p>Nta konti? <button class="textBtn" onclick="page('register')">Iyandikishe</button></p>`:`<form onsubmit="doRegister(event)"><input name="name" autocomplete="name" placeholder="Amazina" required><input name="email" type="email" autocomplete="email" placeholder="Email" required><input name="password" type="password" autocomplete="new-password" minlength="6" placeholder="Password (6+)" required><button class="bigBtn full">Kora konti</button></form><p>Ufite konti? <button class="textBtn" onclick="page('login')">Injira</button></p>`}<button class="guestBtn" onclick="home()">👀 Komeza nka Guest — nta login</button></div>`}
@@ -225,7 +262,15 @@ async function doUpload(e){
   }
 }
 async function social(){const posts=await api('/api/feed');shell(`<div class="pageTitle"><div><span class="eyebrow">FACEBOOK-STYLE</span><h1>● Social Feed</h1><p class="muted">Sangiza abantu ibyo ukunda.</p></div>${user?'<button class="bigBtn" onclick="newPost()">＋ Post</button>':''}</div><div class="feed">${posts.map(postCard).join('')||'<div class="empty">Nta post irimo. Ba uwa mbere!</div>'}</div>`);location.hash='social'}
-function postCard(p){let m=p.media_filename?(p.media_type==='photo'?`<img class="postMedia" src="/uploads/${esc(p.media_filename)}">`:`<video class="postMedia" src="/uploads/${esc(p.media_filename)}" controls></video>`):'';return `<article class="post"><div class="postHead"><div class="avatar">${esc((p.author||'M')[0].toUpperCase())}</div><div><b>${esc(p.author)}</b><small> · ${new Date(p.created_at).toLocaleString()}</small></div></div><p>${esc(p.text)}</p>${m}<div class="postActions"><button onclick="postLike(${p.id})">❤️ ${p.likes}</button><button onclick="postComments(${p.id})">💬 ${p.comments}</button><button onclick="navigator.clipboard?.writeText(location.origin+'/#social');alert('Link yandukuwe')">↗ Sangiza</button></div></article>`}
+function postCard(p){
+  let m=p.media_filename
+    ? (p.media_type==='photo'
+      ? `<img class="postMedia" src="${esc(mediaUrl(p.media_filename))}">`
+      : `<video class="postMedia" src="${esc(mediaUrl(p.media_filename))}" controls></video>`)
+    : '';
+
+  return `<article class="post"><div class="postHead"><div class="avatar">${esc((p.author||'M')[0].toUpperCase())}</div><div><b>${esc(p.author)}</b><small> · ${new Date(p.created_at).toLocaleString()}</small></div></div><p>${esc(p.text)}</p>${m}<div class="postActions"><button onclick="postLike(${p.id})">❤️ ${p.likes}</button><button onclick="postComments(${p.id})">💬 ${p.comments}</button><button onclick="navigator.clipboard?.writeText(location.origin+'/#social');alert('Link yandukuwe')">↗ Sangiza</button></div></article>`;
+}
 async function newPost(){if(!user)return login();shell(`<div class="formPage small"><h1>＋ Kora Post</h1><form class="uploadForm" onsubmit="doPost(event)"><textarea name="text" placeholder="Ni iki ushaka gusangiza abantu?" rows="5"></textarea><label class="fileBox">📷 Shyiraho Photo/Video (optional)<input name="file" type="file" accept="image/*,video/*"></label><button class="bigBtn">Publish Post</button></form></div>`);location.hash='new-post'}
 async function doPost(e){e.preventDefault();try{await api('/api/feed',{method:'POST',body:new FormData(e.target)});social()}catch(err){alert(err.message)}}
 async function postLike(id){if(!user)return login();await api('/api/feed/'+id+'/like',{method:'POST'});social()}
@@ -233,7 +278,11 @@ async function postComments(id){const c=await api('/api/feed/'+id+'/comments');c
 
 let activeChatId=null, activeChatUserId=null, chatPollTimer=null;
 function stopChatPolling(){if(chatPollTimer){clearInterval(chatPollTimer);chatPollTimer=null;}}
-function chatAvatar(u){return u?.avatar?`<img src="/uploads/${esc(u.avatar)}" alt="">`:`<span>${esc((u?.name||'U')[0].toUpperCase())}</span>`}
+function chatAvatar(u){
+  return u?.avatar
+    ? `<img src="${esc(mediaUrl(u.avatar))}" alt="">`
+    : `<span>${esc((u?.name||'U')[0].toUpperCase())}</span>`;
+}
 async function chatPage(selectId=null){
   if(!user)return login();
   stopChatPolling();
@@ -323,7 +372,52 @@ async function sendChat(e){
 async function live(){const rooms=await api('/api/live');shell(`<div class="pageTitle"><div><span class="eyebrow">LIVE</span><h1>🔴 Live Rwanda</h1><p class="muted">Reba live rooms nta login. Host ashobora gushyiramo stream link.</p></div>${user?'<button class="bigBtn" onclick="newLive()">＋ Tangiza Live</button>':''}</div><div class="liveGrid">${rooms.map(l=>`<article class="liveCard"><div class="liveScreen">${l.status==='live'?'🔴 LIVE':'📅'}<span>${esc(l.status)}</span></div><div class="cardBody"><h2>${esc(l.title)}</h2><p class="muted">Hosted by ${esc(l.host)}</p><p>${esc(l.description||'')}</p>${l.stream_url?`<a class="bigBtn" href="${esc(l.stream_url)}" target="_blank" rel="noopener">▶ Fungura Live</a>`:`<span class="muted">Stream link iracyategurwa.</span>`}</div></article>`).join('')||'<div class="empty">Nta Live room irimo.</div>'}</div>`);location.hash='live'}
 function newLive(){if(!user)return login();shell(`<div class="formPage small"><h1>🔴 Tangiza Live</h1><p class="muted">Shyiramo link ya stream niba ukoresha streaming service.</p><form class="uploadForm" onsubmit="doLive(event)"><input name="title" placeholder="Live title" required><textarea name="description" placeholder="Description"></textarea><input name="stream_url" type="url" placeholder="Stream URL (optional)"><select name="status"><option value="live">🔴 Live ubu</option><option value="scheduled">📅 Scheduled</option></select><button class="bigBtn">Tangaza Live</button></form></div>`);location.hash='new-live'}
 async function doLive(e){e.preventDefault();try{await api('/api/live',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});live()}catch(err){alert(err.message)}}
-async function tiktok(){await load();const xs=media.filter(x=>['video','film'].includes(x.type));shell(`<div class="shortsHead"><span class="eyebrow">TIKTOK-STYLE</span><h1>📱 Shorts</h1><p class="muted">Vertical feed. Scroll down urebe video ikurikira. Nta login ikenewe.</p></div><div class="shorts">${xs.map(x=>`<article class="short"><div class="shortVideo">${x.type==='film'?`<video src="/uploads/${esc(x.filename)}" controls playsinline preload="metadata"></video>`:`<video src="/uploads/${esc(x.filename)}" controls playsinline preload="metadata"></video>`}</div><div class="shortInfo"><b>${esc(x.title)}</b><span>${esc(x.author||'MEDIA RWANDA')}</span><small>👁 ${x.views||0} · ❤️ ${x.likes||0}</small><button class="bigBtn" onclick="openMedia(${x.id})">Reba details</button></div></article>`).join('')||'<div class="empty">Nta Shorts irimo. Upload video kugira ngo itangire kugaragara hano.</div>'}</div>`);location.hash='tiktok'}
+async function tiktok(){
+  await load();
+
+  const xs=media.filter(x=>['video','film'].includes(x.type));
+
+  shell(`
+    <div class="shortsHead">
+      <span class="eyebrow">TIKTOK-STYLE</span>
+      <h1>📱 Shorts</h1>
+      <p class="muted">
+        Vertical feed. Scroll down urebe video ikurikira.
+        Nta login ikenewe.
+      </p>
+    </div>
+
+    <div class="shorts">
+      ${xs.map(x=>`
+        <article class="short">
+          <div class="shortVideo">
+            <video
+              src="${esc(mediaUrl(x.filename))}"
+              controls
+              playsinline
+              preload="metadata">
+            </video>
+          </div>
+
+          <div class="shortInfo">
+            <b>${esc(x.title)}</b>
+            <span>${esc(x.author||'MEDIA RWANDA')}</span>
+            <small>👁 ${x.views||0} · ❤️ ${x.likes||0}</small>
+            <button class="bigBtn" onclick="openMedia(${x.id})">
+              Reba details
+            </button>
+          </div>
+        </article>
+      `).join('') || `
+        <div class="empty">
+          Nta Shorts irimo. Upload video kugira ngo itangire kugaragara hano.
+        </div>
+      `}
+    </div>
+  `);
+
+  location.hash='tiktok';
+}
 async function curated(kind,title,subtitle){const xs=await api('/api/media/section/'+kind);shell(`<div class="pageTitle"><div><span class="eyebrow">MEDIA RWANDA</span><h1>${title}</h1><p class="muted">${subtitle}</p></div><span class="count">${xs.length} items</span></div><div class="grid">${xs.map(card).join('')||'<div class="empty">Nta content ihari.</div>'}</div>`);location.hash=kind}
 function infoPage(kind){const pages={about:['About Us','Rwanda Vibe Media ni urubuga rwo gusangiza no kureba Films, Videos, Music, Photos, Sports, Entertainment, Shorts na Social Feed.'],contact:['Contact','Ku bibazo bya site, copyright, content report cyangwa ubufatanye, koresha uburyo bwa contact bwashyizweho n’umuyobozi wa site cyangwa report iri kuri content bireba.'],privacy:['Privacy Policy','Turakusanya amakuru akenewe mu gukora konti, login, uploads, comments na security. Browser ishobora gukoresha local storage cyangwa cookies zikenewe ku login no ku mikorere ya site. Ntidusaba amakuru bwite arenze ibikenewe mu gukoresha serivisi.'],terms:['Terms & Conditions','Ukoresha Rwanda Vibe Media wemera kubahiriza amategeko, copyright, privacy n’amabwiriza ya platform. Ukoresha Upload uremeza ko ufite uburenganzira bwo gutangaza file wohereje.'],copyright:['Copyright / DMCA','Niba uri nyir’uburenganzira kuri content iri kuri Rwanda Vibe Media kandi ukeka ko yakoreshejwe nta burenganzira, tanga report irimo URL/content, ibisobanuro by’uburenganzira n’uburyo bwo kukugeraho.'], 'content-policy':['Community & Content Policy','Birabujijwe kohereza content y’abandi nta burenganzira, spam, scams, malware, deceptive content cyangwa content ibujijwe n’amategeko. User uploads zibanza kujya kuri pending kugira ngo Admin azisuzume.']};const [title,text]=pages[kind]||pages.about;shell(`<article class="legalPage"><span class="eyebrow">MEDIA RWANDA</span><h1>${title}</h1><p>${text}</p><h2>Content n’amakuru</h2><p>Buri content igira igihe yashyizweho n’igihe yavuguruwe. Content nshya igaragara muri Latest, naho iya kera ishobora kujya muri Archive.</p><h2>Kwamamaza</h2><p>Kwamamaza bikorwa gusa ku pages no mu buryo bwubahiriza amabwiriza y’abatanga advertising. Nta fake buttons, forced clicks cyangwa redirects bigamije kwamamaza byemewe.</p></article>`);location.hash=kind}
 function profile(){if(!user)return login();shell(`<div class="profileCard"><div class="avatar big">${esc((user.name||'M')[0].toUpperCase())}</div><h1>${esc(user.name)}</h1><p>${esc(user.email)}</p><span class="role">${esc(user.role)}</span><p class="muted">${esc(user.bio||'MEDIA RWANDA member')}</p><button class="outlineBtn" onclick="logout()">Sohoka</button></div>`);location.hash='profile'}
@@ -355,7 +449,7 @@ async function adminPage(){
 }
 function filterAdminRows(id,q){const root=document.getElementById(id);if(!root)return;const needle=String(q||'').toLowerCase().trim();root.querySelectorAll('.filterRow').forEach(r=>{r.style.display=!needle||r.textContent.toLowerCase().includes(needle)?'flex':'none'})}
 function filterAdminMediaStatus(status){document.querySelectorAll('#adminMedia .mediaAdminRow').forEach(r=>{r.style.display=status==='all'||r.dataset.status===status?'flex':'none'})}
-async function previewAdminMedia(id){try{const x=await api('/api/admin/media');const m=x.find(a=>Number(a.id)===Number(id));if(!m)return;const src='/uploads/'+encodeURIComponent(m.filename);const body=m.type==='music'?`<audio class="adminPreviewMedia" src="${src}" controls></audio>`:m.type==='photo'?`<img class="adminPreviewMedia" src="${src}" alt="">`:`<video class="adminPreviewMedia" src="${src}" controls playsinline></video>`;shell(`<div class="detail"><div class="detailMedia">${body}</div><div class="detailInfo"><button class="backBtn" onclick="adminPage()">← Subira kuri Admin</button><h1>${esc(m.title)}</h1><p class="muted">${esc(m.description||'')} · Status: ${esc(m.status)}</p></div></div>`);location.hash='admin-preview'}catch(e){alert(e.message)}}
+async function previewAdminMedia(id){try{const x=await api('/api/admin/media');const m=x.find(a=>Number(a.id)===Number(id));if(!m)return;const src=mediaUrl(m.filename);const body=m.type==='music'?`<audio class="adminPreviewMedia" src="${src}" controls></audio>`:m.type==='photo'?`<img class="adminPreviewMedia" src="${src}" alt="">`:`<video class="adminPreviewMedia" src="${src}" controls playsinline></video>`;shell(`<div class="detail"><div class="detailMedia">${body}</div><div class="detailInfo"><button class="backBtn" onclick="adminPage()">← Subira kuri Admin</button><h1>${esc(m.title)}</h1><p class="muted">${esc(m.description||'')} · Status: ${esc(m.status)}</p></div></div>`);location.hash='admin-preview'}catch(e){alert(e.message)}}
 async function changeAdminPassword(e){e.preventDefault();const next=document.getElementById('adminNext').value,next2=document.getElementById('adminNext2').value;if(next!==next2)return alert('Password nshya zombi ntizihura.');try{await api('/api/admin/password',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({current:document.getElementById('adminCurrent').value,next})});alert('Password ya admin yahinduwe neza.');e.target.reset()}catch(e){alert(e.message)}}
 async function setUserRole(id,role){try{await api('/api/admin/users/'+id+'/role',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({role})});adminPage()}catch(e){alert(e.message)}}
 async function setUserDisabled(id,disabled){if(!confirm(disabled?'Hagarika uyu mukoresha?':'Subizaho uyu mukoresha?'))return;try{await api('/api/admin/users/'+id+'/disabled',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({disabled})});adminPage()}catch(e){alert(e.message)}}
