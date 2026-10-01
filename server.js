@@ -255,7 +255,7 @@ app.get('/api/r2-status',(req,res)=>{
     r2_ready:!!r2
   });
 });
-app.get('/api/r2-test', async (req, res) => {
+app.get('/api/r2-test', auth, admin, async (req, res) => {
   try {
     const key = `_r2-test/test-${Date.now()}.txt`;
 
