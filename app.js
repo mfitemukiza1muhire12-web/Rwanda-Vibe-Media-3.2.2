@@ -77,7 +77,178 @@ async function sportsPage(){
  location.hash='sports';
 }
 async function collection(p){const t={films:'film',videos:'video',photos:'photo',music:'music','gospel-video':'video','gospel-audio':'music',comedy:'video'}[p];if(['gospel-video','gospel-audio','comedy'].includes(p))media=await api('/api/media/category/'+p);else await load(t);const titles={films:'🎬 Films',videos:'▶ Videos',photos:'▧ Photos',music:'♫ Music','gospel-video':'🎤 Gospel Video','gospel-audio':'🎧 Gospel Audio',comedy:'😂 Comedy'};shell(`<div class="pageTitle"><div><span class="eyebrow">MEDIA RWANDA</span><h1>${titles[p]}</h1><p class="muted">Reba nta login. Abakoresha bashobora gushyira content kuri page ihuye n'icyiciro bahisemo muri Upload.</p></div><span class="count">${media.length} items</span></div><div class="grid">${media.map(card).join('')||'<div class="empty">Nta content irimo muri iyi page. Jya kuri Upload uhitemo category yayo.</div>'}</div>`);location.hash=p}
+async function openMedia(id){
+  try{
+    const x=await api('/api/media/'+id);
 
+    const src=mediaUrl(x.filename);
+    const poster=x.poster ? mediaUrl(x.poster) : '';
+
+    let player='';
+
+    if(x.type==='music'){
+      player=`
+        <audio
+          class="detailAudio"
+          src="${esc(src)}"
+          controls
+          preload="metadata">
+        </audio>
+      `;
+    }else if(x.type==='photo'){
+      player=`
+        <img
+          class="detailPhoto"
+          src="${esc(src)}"
+          alt="${esc(x.title)}"
+          loading="eager">
+      `;
+    }else{
+      player=`
+        <video
+          class="detailVideo"
+          src="${esc(src)}"
+          ${poster ? `poster="${esc(poster)}"` : ''}
+          controls
+          playsinline
+          preload="metadata">
+        </video>
+      `;
+    }
+
+    const comments=await api('/api/media/'+id+'/comments').catch(()=>[]);
+
+    shell(`
+      <div class="detail">
+
+        <div class="detailMedia">
+          ${player}
+        </div>
+
+        <div class="detailInfo">
+
+          <button class="backBtn" onclick="history.back()">
+            ← Subira
+          </button>
+
+          <span class="eyebrow">
+            ${x.type==='film'?'🎬 FILM':
+              x.type==='video'?'▶ VIDEO':
+              x.type==='music'?'♫ MUSIC':
+              '▧ PHOTO'}
+          </span>
+
+          <h1>${esc(x.title)}</h1>
+
+          <p class="muted">
+            ${esc(x.author||'MEDIA RWANDA')}
+            · ${dateTime(x.created_at)}
+          </p>
+
+          ${x.genre || x.year ? `
+            <p class="muted">
+              ${esc(x.genre||'')}
+              ${x.year ? ' · '+esc(x.year) : ''}
+            </p>
+          ` : ''}
+
+          <p>
+            ${esc(x.description||'Nta bisobanuro byatanzwe.')}
+          </p>
+
+          <div class="detailStats">
+            <span>👁 ${x.views||0}</span>
+            <span>❤️ ${x.likes||0}</span>
+            <span>💬 ${x.comments||0}</span>
+          </div>
+
+          <div class="actions detailActions">
+            <button onclick="like(${x.id})">
+              ❤️ ${x.likes||0}
+            </button>
+
+            <button onclick="openMedia(${x.id})">
+              🔄 Refresh
+            </button>
+
+            <button
+              onclick="navigator.clipboard?.writeText(location.origin+'/#media-${x.id}');alert('Link yandukuwe')">
+              ↗ Sangiza
+            </button>
+          </div>
+
+          <section class="commentsSection">
+
+            <div class="sectionHead">
+              <h2>💬 Comments</h2>
+              <span class="count">
+                ${comments.length}
+              </span>
+            </div>
+
+            ${
+              comments.length
+              ? comments.map(c=>`
+                <div class="comment">
+                  <div class="avatar">
+                    ${esc((c.name||'U')[0].toUpperCase())}
+                  </div>
+
+                  <div>
+                    <b>${esc(c.name||'Unknown')}</b>
+                    <small>
+                      · ${dateTime(c.created_at)}
+                    </small>
+                    <p>${esc(c.text||'')}</p>
+                  </div>
+                </div>
+              `).join('')
+              : `
+                <div class="empty">
+                  Nta comment irariho.
+                </div>
+              `
+            }
+
+            ${
+              user
+              ? `
+                <form
+                  class="commentForm"
+                  onsubmit="comment(event,${x.id})">
+
+                  <textarea
+                    id="commentText"
+                    placeholder="Andika comment..."
+                    rows="3"
+                    required></textarea>
+
+                  <button class="bigBtn" type="submit">
+                    💬 Ohereza Comment
+                  </button>
+
+                </form>
+              `
+              : `
+                <div class="guestTip">
+                  🔐 Injira kugira ngo wandike comment.
+                </div>
+              `
+            }
+
+          </section>
+
+        </div>
+
+      </div>
+    `);
+
+    location.hash='media-'+x.id;
+
+  }catch(e){
+    alert(e.message);
+  }
+}
 async function like(id){if(!user){alert('Kanda Injira kugira ngo ukunde content. Ushobora kureba nta login.');return}try{await api('/api/media/'+id+'/like',{method:'POST'});openMedia(id)}catch(e){alert(e.message)}}
 async function comment(e,id){e.preventDefault();try{await api('/api/media/'+id+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:document.getElementById('commentText').value})});openMedia(id)}catch(err){alert(err.message)}}
 function authCard(mode='login'){return `<div class="authCard"><div class="authLogo">MR</div><h1>${mode==='login'?'Murakaza neza 👋':'Fungura konti yawe'}</h1><p class="muted">${mode==='login'?'Injira byoroshye.':'Kora konti mu masegonda make.'}</p>${mode==='login'?`<form onsubmit="doLogin(event)"><input id="email" type="email" autocomplete="email" placeholder="Email" required><input id="pass" type="password" autocomplete="current-password" placeholder="Password" required><button class="bigBtn full">Injira</button></form><p>Nta konti? <button class="textBtn" onclick="page('register')">Iyandikishe</button></p>`:`<form onsubmit="doRegister(event)"><input name="name" autocomplete="name" placeholder="Amazina" required><input name="email" type="email" autocomplete="email" placeholder="Email" required><input name="password" type="password" autocomplete="new-password" minlength="6" placeholder="Password (6+)" required><button class="bigBtn full">Kora konti</button></form><p>Ufite konti? <button class="textBtn" onclick="page('login')">Injira</button></p>`}<button class="guestBtn" onclick="home()">👀 Komeza nka Guest — nta login</button></div>`}
