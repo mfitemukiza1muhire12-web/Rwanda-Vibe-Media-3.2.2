@@ -218,6 +218,43 @@ app.get('/api/r2-status',(req,res)=>{
     r2_ready:!!r2
   });
 });
+app.get('/api/r2-test', auth, admin, async (req, res) => {
+  try {
+    const key = `_r2-test/test-${Date.now()}.txt`;
+
+    await r2.send(new PutObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: key,
+      Body: Buffer.from('Rwanda Vibe Media R2 test'),
+      ContentType: 'text/plain'
+    }));
+
+    console.log('R2 DIRECT TEST: SUCCESS', key);
+
+    res.json({
+      ok: true,
+      message: 'Cloudflare R2 ikora neza',
+      key
+    });
+
+  } catch (err) {
+    console.error('R2 DIRECT TEST ERROR:', {
+      name: err.name,
+      code: err.Code || err.code,
+      status: err.$metadata?.httpStatusCode,
+      message: err.message
+    });
+
+    res.status(500).json({
+      ok: false,
+      name: err.name,
+      code: err.Code || err.code,
+      status: err.$metadata?.httpStatusCode,
+      message: err.message
+    });
+  }
+});
+
 app.post('/api/register',(req,res)=>{const name=String(req.body.name||'').trim();const email=String(req.body.email||'').trim().toLowerCase();const password=String(req.body.password||'');if(name.length<2||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||password.length<6)return res.status(400).json({error:'Amazina, email nyayo na password yibura inyuguti 6 birakenewe'});try{const r=db.prepare('INSERT INTO users(name,email,password) VALUES(?,?,?)').run(name,email,bcrypt.hashSync(password,10));const u=safeUser(r.lastInsertRowid);res.json({token:jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role},SECRET,{expiresIn:'30d'}),user:u})}catch{res.status(409).json({error:'Iyo email isanzwe ikoreshwa'})}});
 app.post('/api/login',(req,res)=>{const email=String(req.body.email||'').trim().toLowerCase();const password=String(req.body.password||'');const u=db.prepare('SELECT * FROM users WHERE email=?').get(email);if(!u||!bcrypt.compareSync(password,u.password))return res.status(401).json({error:'Email cyangwa password si byo'});res.json({token:jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role},SECRET,{expiresIn:'30d'}),user:safeUser(u.id)})});
 app.get('/api/me',auth,(req,res)=>res.json(safeUser(req.user.id)));
