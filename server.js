@@ -7,6 +7,10 @@ const multer=require('multer');
 const {S3Client,PutObjectCommand,DeleteObjectCommand}=require('@aws-sdk/client-s3');
 const {DatabaseSync}=require('node:sqlite');
 
+const upload = multer({
+  storage: multer.memoryStorage()
+});
+
 const app=express();
 
 const PORT=Number(process.env.PORT||3000);
@@ -35,13 +39,18 @@ console.log('R2 DEBUG:', {
   accessLast4: R2_ACCESS_KEY_ID.slice(-4),
   accessHasWhitespace: /\s/.test(R2_ACCESS_KEY_ID),
   accessHasNonAscii: /[^\x00-\x7F]/.test(R2_ACCESS_KEY_ID),
+  accessHasControl: /[\x00-\x1F\x7F]/.test(R2_ACCESS_KEY_ID),
+
   secretLength: R2_SECRET_ACCESS_KEY.length,
   secretHasWhitespace: /\s/.test(R2_SECRET_ACCESS_KEY),
   secretHasNonAscii: /[^\x00-\x7F]/.test(R2_SECRET_ACCESS_KEY),
+  secretHasControl: /[\x00-\x1F\x7F]/.test(R2_SECRET_ACCESS_KEY),
+
   endpoint: R2_ENDPOINT,
+  endpointHasControl: /[\x00-\x1F\x7F]/.test(R2_ENDPOINT),
+
   bucket: R2_BUCKET_NAME
 });
-
 const r2 = (
   R2_ACCOUNT_ID &&
   R2_ACCESS_KEY_ID &&
