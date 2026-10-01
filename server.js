@@ -12,35 +12,52 @@ const app=express();
 const PORT=Number(process.env.PORT||3000);
 const SECRET=process.env.JWT_SECRET||'change-this-secret-in-production';
 
-const R2_ACCOUNT_ID=process.env.R2_ACCOUNT_ID||'';
-const R2_ACCESS_KEY_ID=process.env.R2_ACCESS_KEY_ID||'';
-const R2_SECRET_ACCESS_KEY=process.env.R2_SECRET_ACCESS_KEY||'';
-const R2_BUCKET_NAME=process.env.R2_BUCKET_NAME||'rwanda-vibe-media';
-const R2_ENDPOINT=process.env.R2_ENDPOINT||`https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
-const R2_PUBLIC_URL=String(process.env.R2_PUBLIC_URL||'').replace(/\/$/,'');
-console.log('R2 access key length:', R2_ACCESS_KEY_ID.length);
-console.log('R2 secret key length:', R2_SECRET_ACCESS_KEY.length);
-console.log('R2 account:', R2_ACCOUNT_ID);
-console.log('R2 bucket:', R2_BUCKET_NAME);
+const R2_ACCOUNT_ID = String(process.env.R2_ACCOUNT_ID || '').trim();
+const R2_ACCESS_KEY_ID = String(process.env.R2_ACCESS_KEY_ID || '').trim();
+const R2_SECRET_ACCESS_KEY = String(process.env.R2_SECRET_ACCESS_KEY || '').trim();
+const R2_BUCKET_NAME = String(
+  process.env.R2_BUCKET_NAME || 'rwanda-vibe-media'
+).trim();
 
-const r2=(R2_ACCOUNT_ID&&R2_ACCESS_KEY_ID&&R2_SECRET_ACCESS_KEY)
+const R2_ENDPOINT = String(
+  process.env.R2_ENDPOINT ||
+  `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+).trim();
+
+const R2_PUBLIC_URL = String(process.env.R2_PUBLIC_URL || '')
+  .trim()
+  .replace(/\/$/, '');
+
+console.log('R2 DEBUG:', {
+  accountLength: R2_ACCOUNT_ID.length,
+  accessLength: R2_ACCESS_KEY_ID.length,
+  accessFirst4: R2_ACCESS_KEY_ID.slice(0, 4),
+  accessLast4: R2_ACCESS_KEY_ID.slice(-4),
+  accessHasWhitespace: /\s/.test(R2_ACCESS_KEY_ID),
+  accessHasNonAscii: /[^\x00-\x7F]/.test(R2_ACCESS_KEY_ID),
+  secretLength: R2_SECRET_ACCESS_KEY.length,
+  secretHasWhitespace: /\s/.test(R2_SECRET_ACCESS_KEY),
+  secretHasNonAscii: /[^\x00-\x7F]/.test(R2_SECRET_ACCESS_KEY),
+  endpoint: R2_ENDPOINT,
+  bucket: R2_BUCKET_NAME
+});
+
+const r2 = (
+  R2_ACCOUNT_ID &&
+  R2_ACCESS_KEY_ID &&
+  R2_SECRET_ACCESS_KEY
+)
   ? new S3Client({
-      region:'auto',
-      endpoint:R2_ENDPOINT,
-      credentials:{
-        accessKeyId:R2_ACCESS_KEY_ID,
-        secretAccessKey:R2_SECRET_ACCESS_KEY
+      region: 'auto',
+      endpoint: R2_ENDPOINT,
+      credentials: {
+        accessKeyId: R2_ACCESS_KEY_ID,
+        secretAccessKey: R2_SECRET_ACCESS_KEY
       }
     })
   : null;
 
-const upload=multer({
-  storage:multer.memoryStorage(),
-  limits:{
-    fileSize:1024*1024*1024
-  }
-});
-
+console.log('R2 client ready:', !!r2);
 const ROOT=__dirname;
 const UP=path.join(ROOT,'uploads');
 
