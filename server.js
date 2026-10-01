@@ -67,6 +67,17 @@ const r2 = (
   : null;
 
 console.log('R2 client ready:', !!r2);
+
+console.log('R2 CREDENTIAL CHECK:', {
+  accessLength: R2_ACCESS_KEY_ID.length,
+  accessClean: /^[A-Za-z0-9]+$/.test(R2_ACCESS_KEY_ID),
+  secretLength: R2_SECRET_ACCESS_KEY.length,
+  secretClean: /^[A-Za-z0-9+/=_-]+$/.test(R2_SECRET_ACCESS_KEY),
+  accessCodes: [...R2_ACCESS_KEY_ID].map(c => c.charCodeAt(0)),
+  secretBadCodes: [...R2_SECRET_ACCESS_KEY]
+    .map(c => c.charCodeAt(0))
+    .filter(n => n < 32 || n === 127)
+});
 const ROOT=__dirname;
 const UP=path.join(ROOT,'uploads');
 
