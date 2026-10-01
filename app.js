@@ -77,11 +77,7 @@ async function sportsPage(){
  location.hash='sports';
 }
 async function collection(p){const t={films:'film',videos:'video',photos:'photo',music:'music','gospel-video':'video','gospel-audio':'music',comedy:'video'}[p];if(['gospel-video','gospel-audio','comedy'].includes(p))media=await api('/api/media/category/'+p);else await load(t);const titles={films:'🎬 Films',videos:'▶ Videos',photos:'▧ Photos',music:'♫ Music','gospel-video':'🎤 Gospel Video','gospel-audio':'🎧 Gospel Audio',comedy:'😂 Comedy'};shell(`<div class="pageTitle"><div><span class="eyebrow">MEDIA RWANDA</span><h1>${titles[p]}</h1><p class="muted">Reba nta login. Abakoresha bashobora gushyira content kuri page ihuye n'icyiciro bahisemo muri Upload.</p></div><span class="count">${media.length} items</span></div><div class="grid">${media.map(card).join('')||'<div class="empty">Nta content irimo muri iyi page. Jya kuri Upload uhitemo category yayo.</div>'}</div>`);location.hash=p}
-let player=x.type==='music'
-  ? `<audio controls autoplay class="audio" src="${esc(mediaUrl(x.filename))}"></audio>`
-  : x.type==='photo'
-    ? `<img class="detailPhoto" src="${esc(mediaUrl(x.filename))}">`
-    : `<video controls autoplay class="detailVideo" src="${esc(mediaUrl(x.filename))}"></video>`;
+
 async function like(id){if(!user){alert('Kanda Injira kugira ngo ukunde content. Ushobora kureba nta login.');return}try{await api('/api/media/'+id+'/like',{method:'POST'});openMedia(id)}catch(e){alert(e.message)}}
 async function comment(e,id){e.preventDefault();try{await api('/api/media/'+id+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:document.getElementById('commentText').value})});openMedia(id)}catch(err){alert(err.message)}}
 function authCard(mode='login'){return `<div class="authCard"><div class="authLogo">MR</div><h1>${mode==='login'?'Murakaza neza 👋':'Fungura konti yawe'}</h1><p class="muted">${mode==='login'?'Injira byoroshye.':'Kora konti mu masegonda make.'}</p>${mode==='login'?`<form onsubmit="doLogin(event)"><input id="email" type="email" autocomplete="email" placeholder="Email" required><input id="pass" type="password" autocomplete="current-password" placeholder="Password" required><button class="bigBtn full">Injira</button></form><p>Nta konti? <button class="textBtn" onclick="page('register')">Iyandikishe</button></p>`:`<form onsubmit="doRegister(event)"><input name="name" autocomplete="name" placeholder="Amazina" required><input name="email" type="email" autocomplete="email" placeholder="Email" required><input name="password" type="password" autocomplete="new-password" minlength="6" placeholder="Password (6+)" required><button class="bigBtn full">Kora konti</button></form><p>Ufite konti? <button class="textBtn" onclick="page('login')">Injira</button></p>`}<button class="guestBtn" onclick="home()">👀 Komeza nka Guest — nta login</button></div>`}
@@ -449,7 +445,49 @@ async function adminPage(){
 }
 function filterAdminRows(id,q){const root=document.getElementById(id);if(!root)return;const needle=String(q||'').toLowerCase().trim();root.querySelectorAll('.filterRow').forEach(r=>{r.style.display=!needle||r.textContent.toLowerCase().includes(needle)?'flex':'none'})}
 function filterAdminMediaStatus(status){document.querySelectorAll('#adminMedia .mediaAdminRow').forEach(r=>{r.style.display=status==='all'||r.dataset.status===status?'flex':'none'})}
-async function previewAdminMedia(id){try{const x=await api('/api/admin/media');const m=x.find(a=>Number(a.id)===Number(id));if(!m)return;const src=mediaUrl(m.filename);const body=m.type==='music'?`<audio class="adminPreviewMedia" src="${src}" controls></audio>`:m.type==='photo'?`<img class="adminPreviewMedia" src="${src}" alt="">`:`<video class="adminPreviewMedia" src="${src}" controls playsinline></video>`;shell(`<div class="detail"><div class="detailMedia">${body}</div><div class="detailInfo"><button class="backBtn" onclick="adminPage()">← Subira kuri Admin</button><h1>${esc(m.title)}</h1><p class="muted">${esc(m.description||'')} · Status: ${esc(m.status)}</p></div></div>`);location.hash='admin-preview'}catch(e){alert(e.message)}}
+async function previewAdminMedia(id){
+  try{
+    const x=await api('/api/admin/media');
+    const m=x.find(a=>Number(a.id)===Number(id));
+
+    if(!m)return;
+
+    const src=mediaUrl(m.filename);
+
+    const body=
+      m.type==='music'
+        ? `<audio class="adminPreviewMedia" src="${esc(src)}" controls></audio>`
+        : m.type==='photo'
+          ? `<img class="adminPreviewMedia" src="${esc(src)}" alt="">`
+          : `<video class="adminPreviewMedia" src="${esc(src)}" controls playsinline></video>`;
+
+    shell(`
+      <div class="detail">
+        <div class="detailMedia">
+          ${body}
+        </div>
+
+        <div class="detailInfo">
+          <button class="backBtn" onclick="adminPage()">
+            ← Subira kuri Admin
+          </button>
+
+          <h1>${esc(m.title)}</h1>
+
+          <p class="muted">
+            ${esc(m.description||'')} ·
+            Status: ${esc(m.status)}
+          </p>
+        </div>
+      </div>
+    `);
+
+    location.hash='admin-preview';
+
+  }catch(e){
+    alert(e.message);
+  }
+}
 async function changeAdminPassword(e){e.preventDefault();const next=document.getElementById('adminNext').value,next2=document.getElementById('adminNext2').value;if(next!==next2)return alert('Password nshya zombi ntizihura.');try{await api('/api/admin/password',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({current:document.getElementById('adminCurrent').value,next})});alert('Password ya admin yahinduwe neza.');e.target.reset()}catch(e){alert(e.message)}}
 async function setUserRole(id,role){try{await api('/api/admin/users/'+id+'/role',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({role})});adminPage()}catch(e){alert(e.message)}}
 async function setUserDisabled(id,disabled){if(!confirm(disabled?'Hagarika uyu mukoresha?':'Subizaho uyu mukoresha?'))return;try{await api('/api/admin/users/'+id+'/disabled',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({disabled})});adminPage()}catch(e){alert(e.message)}}
