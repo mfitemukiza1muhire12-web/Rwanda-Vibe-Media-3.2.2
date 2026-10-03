@@ -99,7 +99,7 @@ async function openMedia(id){
           controls
           preload="metadata">
         </audio>
-      `;
+    
    }else if(x.type==='photo'){
   player=`
     <img
