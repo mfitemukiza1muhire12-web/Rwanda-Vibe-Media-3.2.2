@@ -107,7 +107,7 @@ async function openMedia(id){
           src="${esc(src)}"
           alt="${esc(x.title)}"
          loading="eager">
-  `;
+  
     }else{
   player=`
     <video
