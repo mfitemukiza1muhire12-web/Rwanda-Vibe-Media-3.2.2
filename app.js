@@ -682,4 +682,37 @@ function openHub(url,name){shell(`<div class="webSearchPage"><div class="webLogo
 function googleType(type){const q=String(document.getElementById('webQuery')?.value||query).trim();if(!q)return web();const urls={images:'https://www.google.com/search?tbm=isch&q=',news:'https://www.google.com/search?tbm=nws&q=',videos:'https://www.google.com/search?tbm=vid&q='};window.open((urls[type]||urls.images)+encodeURIComponent(q),'_blank','noopener,noreferrer')}
 function googleMaps(){const q=String(document.getElementById('webQuery')?.value||query).trim();if(!q)return web();window.open('https://www.google.com/maps/search/'+encodeURIComponent(q),'_blank','noopener,noreferrer')}
 function page(p){if(p==='home')return home();if(p==='web')return web();if(p==='login')return login();if(p==='register')return register();if(p==='upload')return uploadPage();if(p==='social')return social();if(p==='chat')return chatPage();if(p==='live')return live();if(p==='tiktok')return tiktok();if(['films','videos','photos','music','gospel-video','gospel-audio','comedy'].includes(p))return collection(p);if(p==='sports')return sportsPage();if(['latest','trending','popular','old'].includes(p))return curated(p,p==='latest'?'🆕 Latest':p==='trending'?'🔥 Trending':p==='popular'?'⭐ Popular':'📦 Archive','Ibi byatoranyijwe hakurikijwe itariki, views, likes na comments.');if(['about','contact','privacy','terms','copyright','content-policy'].includes(p))return infoPage(p);if(p==='profile')return profile();if(p==='admin')return adminPage()}
-(async()=>{if(token)try{user=await api('/api/me')}catch{token='';localStorage.removeItem('mr_token')}home()})();
+(async()=>{
+  try{
+    if(token){
+      try{
+        user=await api('/api/me');
+      }catch(e){
+        token='';
+        user=null;
+        localStorage.removeItem('mr_token');
+      }
+    }
+
+    const hash=location.hash.replace(/^#/,'');
+    page(hash || 'home');
+
+  }catch(e){
+    console.error('MEDIA RWANDA startup error:',e);
+
+    app.innerHTML=`
+      <div style="padding:40px;font-family:Arial;text-align:center">
+        <h1>MEDIA RWANDA</h1>
+        <p>Habaye ikibazo mu gufungura urubuga.</p>
+        <button onclick="location.reload()">
+          🔄 Ongera ugerageze
+        </button>
+      </div>
+    `;
+  }
+})();
+
+window.addEventListener('hashchange',()=>{
+  const hash=location.hash.replace(/^#/,'') || 'home';
+  page(hash);
+});
