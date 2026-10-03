@@ -153,7 +153,10 @@ if(!db.prepare('SELECT id FROM users WHERE email=?').get('admin@mediarwanda.com'
 app.use(express.json({limit:'3mb'}));
 app.use(express.urlencoded({extended:true}));
 app.use(express.static(ROOT));
-app.use('/uploads',express.static(UP,{maxAge:'1d'}));
+app.use('/uploads',express.static(UP,{
+  maxAge:'1d',
+  acceptRanges:true
+}));
 
 function auth(req,res,next){try{const h=req.headers.authorization||'';if(!h.startsWith('Bearer '))throw 0;req.user=jwt.verify(h.slice(7),SECRET);const u=db.prepare('SELECT id,role,disabled FROM users WHERE id=?').get(req.user.id);if(!u||u.disabled)throw 0;req.user.role=u.role;next()}catch{res.status(401).json({error:'Login required'})}}
 function admin(req,res,next){if(req.user?.role!=='admin')return res.status(403).json({error:'Admin only'});next()}
