@@ -100,14 +100,15 @@ async function openMedia(id){
           preload="metadata">
         </audio>
       `;
-    }else if(x.type==='photo'){
-      player=`
-        <img
-          class="detailPhoto"
-          src="${esc(src)}"
-          alt="${esc(x.title)}"
-         loading="eager">
-  
+   }else if(x.type==='photo'){
+  player=`
+    <img
+      class="detailPhoto"
+      src="${esc(src)}"
+      alt="${esc(x.title)}"
+      loading="eager">
+
+}else{
     }else{
   player=`
     <video
