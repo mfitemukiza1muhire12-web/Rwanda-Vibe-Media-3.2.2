@@ -106,8 +106,9 @@ async function openMedia(id){
           class="detailPhoto"
           src="${esc(src)}"
           alt="${esc(x.title)}"
-          loading="eager">
- }else{
+         loading="eager">
+  `;
+    }else{
   player=`
     <video
       class="detailVideo"
