@@ -49,15 +49,20 @@ function dateTime(d){const t=new Date(d);return Number.isNaN(t.getTime())?'':t.t
 function footer(){return `<footer class="siteFooter"><div><b>RWANDA VIBE MEDIA</b><p>Urubuga rw’ibirimo bya siporo, imyidagaduro, Films, Videos, Music, Photos na Social Feed.</p></div><div class="footerLinks"><button onclick="page('about')">About Us</button><button onclick="page('contact')">Contact</button><button onclick="page('privacy')">Privacy Policy</button><button onclick="page('terms')">Terms</button><button onclick="page('copyright')">Copyright</button><button onclick="page('content-policy')">Content Policy</button></div><small>© ${new Date().getFullYear()} MEDIA RWANDA · Content rights belong to their respective owners.</small></footer>`;}
 function thumb(x){
   if(x.poster){
-    return `<img class="thumb" src="${esc(mediaUrl(x.poster))}" loading="lazy">`;
+    return `<img class="thumb" src="${esc(mediaUrl(x.poster))}" loading="lazy" alt="${esc(x.title||'')}">`;
   }
 
   if(x.type==='photo'){
-    return `<img class="thumb" src="${esc(mediaUrl(x.filename))}" loading="lazy">`;
+    return `<img class="thumb" src="${esc(mediaUrl(x.filename))}" loading="lazy" alt="${esc(x.title||'')}">`;
   }
 
   if(x.type==='video'||x.type==='film'){
-    return `<video class="thumb" src="${esc(mediaUrl(x.filename))}" muted preload="metadata"></video>`;
+    return `
+      <div class="videoThumb">
+        <div class="videoThumbIcon">▶</div>
+        <span>VIDEO</span>
+      </div>
+    `;
   }
 
   return `<div class="musicThumb"><span>♫</span><small>MUSIC</small></div>`;
@@ -103,19 +108,19 @@ async function openMedia(id){
           alt="${esc(x.title)}"
           loading="eager">
       `;
-    }else{
-      player=`
-        <video
-          class="detailVideo"
-          src="${esc(src)}"
-          ${poster ? `poster="${esc(poster)}"` : ''}
-          controls
-          playsinline
-          preload="metadata">
-        </video>
-      `;
-    }
-
+  }else{
+  player=`
+    <video
+      class="detailVideo"
+      ${poster ? `poster="${esc(poster)}"` : ''}
+      controls
+      playsinline
+      preload="metadata">
+      <source src="${esc(src)}" type="video/mp4">
+      Browser yawe ntishoboye gukina iyi video.
+    </video>
+  `;
+}
     const comments=await api('/api/media/'+id+'/comments').catch(()=>[]);
 
     shell(`
@@ -559,11 +564,12 @@ async function tiktok(){
         <article class="short">
           <div class="shortVideo">
             <video
-              src="${esc(mediaUrl(x.filename))}"
-              controls
-              playsinline
-              preload="metadata">
-            </video>
+  controls
+  playsinline
+  preload="metadata">
+  <source src="${esc(mediaUrl(x.filename))}" type="video/mp4">
+  Browser yawe ntishoboye gukina iyi video.
+</video>
           </div>
 
           <div class="shortInfo">
