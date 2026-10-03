@@ -79,7 +79,7 @@ console.log('R2 CREDENTIAL CHECK:', {
     .filter(n => n < 32 || n === 127)
 });
 const ROOT=__dirname;
-const UP=path.join(ROOT,'uploads');
+const UP='/uploads';
 
 fs.mkdirSync(UP,{recursive:true});
 const db=new DatabaseSync(path.join(ROOT,'media-rwanda.db'));
