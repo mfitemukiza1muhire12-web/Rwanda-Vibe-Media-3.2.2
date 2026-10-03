@@ -709,8 +709,8 @@ app.delete('/api/media/:id',auth,admin,async(req,res)=>{
   }
 
   try{
-    // Siba video/photo/music muri Cloudflare R2
-    await deleteMediaFile(m.filename);
+   // Siba video/photo/music kuri storage ikwiye
+await deleteMediaFile(m.filename);
 
 if(m.poster){
   await deleteMediaFile(m.poster);
@@ -838,8 +838,8 @@ app.post('/api/feed',auth,upload.single('file'),async(req,res)=>{
 
       const type=isImage?'photo':'video';
 
-      // Bika file muri Cloudflare R2
-      fileKey=`/uploads/social-feed/${makeSafeFileName(f.originalname)}`;
+      // Bika file kuri Render Persistent Disk
+fileKey=`/uploads/social-feed/${makeSafeFileName(f.originalname)}`;
 
 await uploadToDisk(f,fileKey);
       // Social Feed media igomba guhita iba published
