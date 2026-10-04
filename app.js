@@ -5,23 +5,30 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&
 function mediaUrl(value){
   if(!value) return '';
 
-  const s = String(value).trim();
+  let s = String(value).trim();
 
-  // URL yuzuye ya R2 cyangwa indi public URL
+  // URL yuzuye
   if(/^https?:\/\//i.test(s)){
     return s;
   }
 
-  // Niba ari local uploads
+  // Local uploads
   if(s.startsWith('/uploads/')){
     return s;
   }
 
-  // Niba backend yabitse R2 key nka media/xxx.mp4
-  // cyangwa posters/xxx.jpg
+  // R2 public domain
   const publicUrl = 'https://media.rwandavibem.com';
 
-  return publicUrl + '/' + s.replace(/^\/+/, '');
+  // Kuraho slash ziri imbere
+  s = s.replace(/^\/+/, '');
+
+  // Niba database yarabitse /uploads/ nta mpamvu yo kuyongera
+  if(s.startsWith('uploads/')){
+    return '/' + s;
+  }
+
+  return `${publicUrl}/${s}`;
 }
 async function api(url,opt={}){opt.headers=opt.headers||{};if(token)opt.headers.Authorization='Bearer '+token;const r=await fetch(url,opt);const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Habaye ikibazo');return d}
 function side(id,ico,label){return `<button class="navItem ${location.hash==='#'+id?'active':''}" onclick="page('${id}')"><b>${ico}</b><span>${label}</span></button>`}
@@ -111,24 +118,36 @@ async function openMedia(id){
           alt="${esc(x.title)}"
           loading="eager">
       `;
-   }else{
+  }else{
+  const videoType =
+    /\.mp4($|\?)/i.test(src) ? 'video/mp4' :
+    /\.webm($|\?)/i.test(src) ? 'video/webm' :
+    /\.ogg($|\?)/i.test(src) ? 'video/ogg' :
+    '';
+
   player=`
     <video
+      id="detailVideo"
       class="detailVideo"
       ${poster ? `poster="${esc(poster)}"` : ''}
       controls
       playsinline
       preload="metadata"
-      crossorigin="anonymous"
-      style="width:100%;max-width:100%;background:#000;">
+      style="width:100%;max-width:100%;background:#000;display:block;">
 
-      <source src="${esc(src)}">
+      <source
+        src="${esc(src)}"
+        ${videoType ? `type="${videoType}"` : ''}>
 
       Browser yawe ntishoboye gukina iyi video.
     </video>
+
+    <div id="videoError"
+         style="display:none;margin-top:10px;padding:12px;background:#2b1111;color:#fff;border-radius:8px;">
+      ❌ Video ntiyashoboye gukinwa.
+    </div>
   `;
 }
-
     const comments = await api('/api/media/' + id + '/comments').catch(() => []);
 
     shell(`
@@ -262,6 +281,32 @@ async function openMedia(id){
     `);
 
     location.hash = 'media-' + x.id;
+    const video=document.getElementById('detailVideo');
+
+if(video){
+  video.addEventListener('error',()=>{
+    const box=document.getElementById('videoError');
+    if(box) box.style.display='block';
+
+    console.error('VIDEO ERROR:', {
+      src: video.currentSrc || src,
+      networkState: video.networkState,
+      readyState: video.readyState,
+      error: video.error
+    });
+  });
+
+  video.addEventListener('loadedmetadata',()=>{
+    console.log('VIDEO OK:', {
+      src: video.currentSrc,
+      duration: video.duration,
+      width: video.videoWidth,
+      height: video.videoHeight
+    });
+  });
+}
+
+    
 
   }catch(e){
     alert(e.message);
