@@ -249,22 +249,19 @@ async function uploadToDisk(file,key){
 function r2Url(key){
   if(!key) return '';
 
-  // Full URL
-  if(/^https?:\/\//i.test(key)){
-    return key;
+  const s=String(key).trim();
+
+  // Niba ari URL yuzuye, yisubize uko iri
+  if(/^https?:\/\//i.test(s)){
+    return s;
   }
 
-  // Files nshya zibitswe kuri Render Persistent Disk
-  if(/^\/uploads\//i.test(key)){
-    return key;
-  }
-
-  // Files za kera zari zisanzwe muri R2
+  // R2 public URL
   if(R2_PUBLIC_URL){
-    return `${R2_PUBLIC_URL}/${String(key).replace(/^\/+/,'')}`;
+    return `${R2_PUBLIC_URL}/${s.replace(/^\/+/,'')}`;
   }
 
-  return key;
+  return s;
 }
 
 function makeSafeFileName(original){
@@ -275,6 +272,31 @@ function makeSafeFileName(original){
     .slice(0,70)||'media';
 
   return `${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}${ext}`;
+}
+
+function getMediaContentType(file){
+  const ext=path.extname(file?.originalname||'').toLowerCase();
+
+  const types={
+    '.mp4':'video/mp4',
+    '.m4v':'video/mp4',
+    '.webm':'video/webm',
+    '.ogv':'video/ogg',
+    '.ogg':'video/ogg',
+
+    '.mp3':'audio/mpeg',
+    '.m4a':'audio/mp4',
+    '.wav':'audio/wav',
+    '.aac':'audio/aac',
+
+    '.jpg':'image/jpeg',
+    '.jpeg':'image/jpeg',
+    '.png':'image/png',
+    '.webp':'image/webp',
+    '.gif':'image/gif'
+  };
+
+  return types[ext] || file?.mimetype || 'application/octet-stream';
 }
 
 async function uploadToR2(file,key){
@@ -288,12 +310,22 @@ async function uploadToR2(file,key){
     throw new Error('File buffer ntibonetse');
   }
 
+  const contentType=getMediaContentType(file);
+
   await r2.send(new PutObjectCommand({
     Bucket:R2_BUCKET_NAME,
     Key:key,
     Body:file.buffer,
-    ContentType:file.mimetype
+    ContentType:contentType,
+    CacheControl:'public, max-age=31536000'
   }));
+
+  console.log('R2 PUT SUCCESS:',{
+    key,
+    contentType,
+    originalName:file.originalname,
+    size:file.size
+  });
 
   return key;
 }
@@ -535,30 +567,27 @@ app.post('/api/media',auth,upload.fields([
     });
   }
 
-  const safeName=(original)=>{
-    const ext=path.extname(original).toLowerCase();
+  const fileKey=`media/${makeSafeFileName(f.originalname)}`;
 
-    const base=path.basename(original,ext)
-      .replace(/[^a-zA-Z0-9_-]/g,'_')
-      .slice(0,70)||'media';
-
-    return `${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}${ext}`;
-  };
-
-  const fileKey=`/uploads/media/${safeName(f.originalname)}`;
   const posterKey=p
-    ? `/uploads/posters/${safeName(p.originalname)}`
+    ? `posters/${makeSafeFileName(p.originalname)}`
     : '';
 
   try{
 
-    // Bika main media kuri Render Persistent Disk
-    await uploadToDisk(f,fileKey);
+    // =========================
+    // CLOUDFlARE R2
+    // =========================
 
-    // Bika poster kuri Render Persistent Disk
+    await uploadToR2(f,fileKey);
+
     if(p){
-      await uploadToDisk(p,posterKey);
+      await uploadToR2(p,posterKey);
     }
+
+    // =========================
+    // SAVE DATABASE
+    // =========================
 
     const r=db.prepare(`
       INSERT INTO media(
@@ -592,6 +621,15 @@ app.post('/api/media',auth,upload.fields([
 
     const id=r.lastInsertRowid;
 
+    console.log('R2 MEDIA UPLOAD SUCCESS:',{
+      id,
+      fileKey,
+      posterKey,
+      type,
+      mimetype:f.mimetype,
+      size:f.size
+    });
+
     res.json({
       ok:true,
       id,
@@ -601,21 +639,32 @@ app.post('/api/media',auth,upload.fields([
 
   }catch(err){
 
-    console.error('Render Disk upload error:',err);
+    console.error('R2 media upload error:',{
+      name:err.name,
+      code:err.Code||err.code,
+      status:err.$metadata?.httpStatusCode,
+      message:err.message
+    });
 
-    await deleteMediaFile(fileKey);
+    // Niba video yaragiye muri R2 ariko DB ikanga
+    await deleteFromR2(fileKey);
 
     if(posterKey){
-      await deleteMediaFile(posterKey);
+      await deleteFromR2(posterKey);
     }
 
     res.status(500).json({
-      error:'Kubika media kuri Render Persistent Disk byanze',
+      error:'Kubika media kuri Cloudflare R2 byanze',
       detail:err.message
     });
   }
 });
-app.put('/api/media/:id',auth,admin,upload.fields([{name:'file',maxCount:1},{name:'poster',maxCount:1}]),async(req,res)=>{
+ 
+app.put('/api/media/:id',auth,admin,upload.fields([
+  {name:'file',maxCount:1},
+  {name:'poster',maxCount:1}
+]),async(req,res)=>{
+
   const id=Number(req.params.id);
 
   const m=db.prepare('SELECT * FROM media WHERE id=?').get(id);
@@ -634,18 +683,24 @@ app.put('/api/media/:id',auth,admin,upload.fields([{name:'file',maxCount:1},{nam
   let newPosterKey=m.poster;
 
   try{
-   if(f){
-  newFileKey=`/uploads/media/${makeSafeFileName(f.originalname)}`;
-  await uploadToDisk(f,newFileKey);
-}
 
-if(p){
-  newPosterKey=`/uploads/posters/${makeSafeFileName(p.originalname)}`;
-  await uploadToDisk(p,newPosterKey);
-}
-    const newType=['film','video','photo','music'].includes(b.type)
-      ? b.type
-      : m.type;
+    // Upload nshya muri R2
+    if(f){
+      newFileKey=`media/${makeSafeFileName(f.originalname)}`;
+
+      await uploadToR2(f,newFileKey);
+    }
+
+    if(p){
+      newPosterKey=`posters/${makeSafeFileName(p.originalname)}`;
+
+      await uploadToR2(p,newPosterKey);
+    }
+
+    const newType=
+      ['film','video','photo','music'].includes(b.type)
+        ? b.type
+        : m.type;
 
     db.prepare(`
       UPDATE media
@@ -669,14 +724,20 @@ if(p){
       id
     );
 
-    // File ya kera uyisibe muri R2 nyuma yo kubona nshya neza
-   if(f && m.filename){
-  await deleteMediaFile(m.filename);
-}
+    // Siba file ya kera nyuma yo kubika nshya
+    if(f && m.filename){
+      await deleteMediaFile(m.filename);
+    }
 
-if(p && m.poster){
-  await deleteMediaFile(m.poster);
-}
+    if(p && m.poster){
+      await deleteMediaFile(m.poster);
+    }
+
+    console.log('R2 MEDIA UPDATE SUCCESS:',{
+      id,
+      filename:newFileKey,
+      poster:newPosterKey
+    });
 
     res.json({
       ok:true,
@@ -684,58 +745,29 @@ if(p && m.poster){
     });
 
   }catch(err){
-   console.error('Media update error:',err);
 
-    // Niba upload nshya yarakozwe ariko update ikanga, uyisibe
-   if(f && newFileKey!==m.filename){
-  await deleteMediaFile(newFileKey);
-}
+    console.error('R2 media update error:',{
+      name:err.name,
+      code:err.Code||err.code,
+      status:err.$metadata?.httpStatusCode,
+      message:err.message
+    });
 
-if(p && newPosterKey!==m.poster){
-  await deleteMediaFile(newPosterKey);
-}
+    // Siba upload nshya niba update yanze
+    if(f && newFileKey!==m.filename){
+      await deleteFromR2(newFileKey);
+    }
+
+    if(p && newPosterKey!==m.poster){
+      await deleteFromR2(newPosterKey);
+    }
 
     res.status(500).json({
-      error:'Kuvugurura media kuri Render Persistent Disk byanze'
+      error:'Kuvugurura media kuri Cloudflare R2 byanze',
+      detail:err.message
     });
   }
 });
-app.delete('/api/media/:id',auth,admin,async(req,res)=>{
-  const id=Number(req.params.id);
-
-  const m=db.prepare('SELECT * FROM media WHERE id=?').get(id);
-
-  if(!m){
-    return res.status(404).json({
-      error:'Media ntiboneka'
-    });
-  }
-
-  try{
-   // Siba video/photo/music kuri storage ikwiye
-await deleteMediaFile(m.filename);
-
-if(m.poster){
-  await deleteMediaFile(m.poster);
-}
-
-    // Hanyuma usibe record muri SQLite
-    db.prepare('DELETE FROM media WHERE id=?').run(id);
-
-    res.json({
-      ok:true,
-      message:'Media yasibwe neza'
-    });
-
-  }catch(err){
-    console.error('Delete media error:',err);
-    return res.status(500).json({
-     error:'Gusiba media byanze'
-    });
-  }
-});
-
-
 // Private one-to-one chat: WhatsApp-style conversations backed by SQLite.
 // This uses short polling so it works on a normal Render Web Service without WebSockets.
 function getChatForUsers(a,b){
