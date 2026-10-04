@@ -84,44 +84,45 @@ async function sportsPage(){
 async function collection(p){const t={films:'film',videos:'video',photos:'photo',music:'music','gospel-video':'video','gospel-audio':'music',comedy:'video'}[p];if(['gospel-video','gospel-audio','comedy'].includes(p))media=await api('/api/media/category/'+p);else await load(t);const titles={films:'🎬 Films',videos:'▶ Videos',photos:'▧ Photos',music:'♫ Music','gospel-video':'🎤 Gospel Video','gospel-audio':'🎧 Gospel Audio',comedy:'😂 Comedy'};shell(`<div class="pageTitle"><div><span class="eyebrow">MEDIA RWANDA</span><h1>${titles[p]}</h1><p class="muted">Reba nta login. Abakoresha bashobora gushyira content kuri page ihuye n'icyiciro bahisemo muri Upload.</p></div><span class="count">${media.length} items</span></div><div class="grid">${media.map(card).join('')||'<div class="empty">Nta content irimo muri iyi page. Jya kuri Upload uhitemo category yayo.</div>'}</div>`);location.hash=p}
 async function openMedia(id){
   try{
-    const x=await api('/api/media/'+id);
+    const x = await api('/api/media/' + id);
 
-    const src=mediaUrl(x.filename);
-    const poster=x.poster ? mediaUrl(x.poster) : '';
+    const src = mediaUrl(x.filename);
+    const poster = x.poster ? mediaUrl(x.poster) : '';
 
-    let player='';
+    let player = '';
 
-    if(x.type==='music'){
-      player=`
+    if(x.type === 'music'){
+      player = `
         <audio
           class="detailAudio"
           src="${esc(src)}"
           controls
           preload="metadata">
         </audio>
-    
-   }else if(x.type==='photo'){
-  player=`
-    <img
-      class="detailPhoto"
-      src="${esc(src)}"
-      alt="${esc(x.title)}"
-      loading="eager">
+      `;
+    }else if(x.type === 'photo'){
+      player = `
+        <img
+          class="detailPhoto"
+          src="${esc(src)}"
+          alt="${esc(x.title)}"
+          loading="eager">
+      `;
+    }else{
+      player = `
+        <video
+          class="detailVideo"
+          ${poster ? `poster="${esc(poster)}"` : ''}
+          controls
+          playsinline
+          preload="metadata">
+          <source src="${esc(src)}" type="video/mp4">
+          Browser yawe ntishoboye gukina iyi video.
+        </video>
+      `;
+    }
 
-}else{
-  player=`
-    <video
-      class="detailVideo"
-      ${poster ? `poster="${esc(poster)}"` : ''}
-      controls
-      playsinline
-      preload="metadata">
-      <source src="${esc(src)}" type="video/mp4">
-      Browser yawe ntishoboye gukina iyi video.
-    </video>
-  `;
-}
-    const comments=await api('/api/media/'+id+'/comments').catch(()=>[]);
+    const comments = await api('/api/media/' + id + '/comments').catch(() => []);
 
     shell(`
       <div class="detail">
@@ -137,39 +138,45 @@ async function openMedia(id){
           </button>
 
           <span class="eyebrow">
-            ${x.type==='film'?'🎬 FILM':
-              x.type==='video'?'▶ VIDEO':
-              x.type==='music'?'♫ MUSIC':
-              '▧ PHOTO'}
+            ${
+              x.type === 'film' ? '🎬 FILM' :
+              x.type === 'video' ? '▶ VIDEO' :
+              x.type === 'music' ? '♫ MUSIC' :
+              '▧ PHOTO'
+            }
           </span>
 
           <h1>${esc(x.title)}</h1>
 
           <p class="muted">
-            ${esc(x.author||'MEDIA RWANDA')}
+            ${esc(x.author || 'MEDIA RWANDA')}
             · ${dateTime(x.created_at)}
           </p>
 
-          ${x.genre || x.year ? `
-            <p class="muted">
-              ${esc(x.genre||'')}
-              ${x.year ? ' · '+esc(x.year) : ''}
-            </p>
-          ` : ''}
+          ${
+            x.genre || x.year
+              ? `
+                <p class="muted">
+                  ${esc(x.genre || '')}
+                  ${x.year ? ' · ' + esc(x.year) : ''}
+                </p>
+              `
+              : ''
+          }
 
           <p>
-            ${esc(x.description||'Nta bisobanuro byatanzwe.')}
+            ${esc(x.description || 'Nta bisobanuro byatanzwe.')}
           </p>
 
           <div class="detailStats">
-            <span>👁 ${x.views||0}</span>
-            <span>❤️ ${x.likes||0}</span>
-            <span>💬 ${x.comments||0}</span>
+            <span>👁 ${x.views || 0}</span>
+            <span>❤️ ${x.likes || 0}</span>
+            <span>💬 ${x.comments || 0}</span>
           </div>
 
           <div class="actions detailActions">
             <button onclick="like(${x.id})">
-              ❤️ ${x.likes||0}
+              ❤️ ${x.likes || 0}
             </button>
 
             <button onclick="openMedia(${x.id})">
@@ -177,7 +184,7 @@ async function openMedia(id){
             </button>
 
             <button
-              onclick="navigator.clipboard?.writeText(location.origin+'/#media-${x.id}');alert('Link yandukuwe')">
+              onclick="navigator.clipboard?.writeText(location.origin + '/#media-${x.id}');alert('Link yandukuwe')">
               ↗ Sangiza
             </button>
           </div>
@@ -193,52 +200,51 @@ async function openMedia(id){
 
             ${
               comments.length
-              ? comments.map(c=>`
-                <div class="comment">
-                  <div class="avatar">
-                    ${esc((c.name||'U')[0].toUpperCase())}
-                  </div>
+                ? comments.map(c => `
+                    <div class="comment">
+                      <div class="avatar">
+                        ${esc((c.name || 'U')[0].toUpperCase())}
+                      </div>
 
-                  <div>
-                    <b>${esc(c.name||'Unknown')}</b>
-                    <small>
-                      · ${dateTime(c.created_at)}
-                    </small>
-                    <p>${esc(c.text||'')}</p>
-                  </div>
-                </div>
-              `).join('')
-              : `
-                <div class="empty">
-                  Nta comment irariho.
-                </div>
-              `
+                      <div>
+                        <b>${esc(c.name || 'Unknown')}</b>
+                        <small>
+                          · ${dateTime(c.created_at)}
+                        </small>
+                        <p>${esc(c.text || '')}</p>
+                      </div>
+                    </div>
+                  `).join('')
+                : `
+                    <div class="empty">
+                      Nta comment irariho.
+                    </div>
+                  `
             }
 
             ${
               user
-              ? `
-                <form
-                  class="commentForm"
-                  onsubmit="comment(event,${x.id})">
+                ? `
+                    <form
+                      class="commentForm"
+                      onsubmit="comment(event,${x.id})">
 
-                  <textarea
-                    id="commentText"
-                    placeholder="Andika comment..."
-                    rows="3"
-                    required></textarea>
+                      <textarea
+                        id="commentText"
+                        placeholder="Andika comment..."
+                        rows="3"
+                        required></textarea>
 
-                  <button class="bigBtn" type="submit">
-                    💬 Ohereza Comment
-                  </button>
-
-                </form>
-              `
-              : `
-                <div class="guestTip">
-                  🔐 Injira kugira ngo wandike comment.
-                </div>
-              `
+                      <button class="bigBtn" type="submit">
+                        💬 Ohereza Comment
+                      </button>
+                    </form>
+                  `
+                : `
+                    <div class="guestTip">
+                      🔐 Injira kugira ngo wandike comment.
+                    </div>
+                  `
             }
 
           </section>
@@ -248,7 +254,7 @@ async function openMedia(id){
       </div>
     `);
 
-    location.hash='media-'+x.id;
+    location.hash = 'media-' + x.id;
 
   }catch(e){
     alert(e.message);
