@@ -109,7 +109,6 @@ async function openMedia(id){
       loading="eager">
 
 }else{
-    }else{
   player=`
     <video
       class="detailVideo"
