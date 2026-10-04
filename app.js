@@ -3,22 +3,25 @@ let token=localStorage.getItem('mr_token')||'',user=null,media=[],query='';
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 
 function mediaUrl(value){
-  if(!value)return '';
+  if(!value) return '';
 
-  const s=String(value).trim();
+  const s = String(value).trim();
 
-  // R2 URL yuzuye
+  // URL yuzuye ya R2 cyangwa indi public URL
   if(/^https?:\/\//i.test(s)){
     return s;
   }
 
-  // Local uploads URL
+  // Niba ari local uploads
   if(s.startsWith('/uploads/')){
     return s;
   }
 
-  // Local file
-  return '/uploads/'+s.replace(/^\/+/,'');
+  // Niba backend yabitse R2 key nka media/xxx.mp4
+  // cyangwa posters/xxx.jpg
+  const publicUrl = 'https://media.rwandavibem.com';
+
+  return publicUrl + '/' + s.replace(/^\/+/, '');
 }
 async function api(url,opt={}){opt.headers=opt.headers||{};if(token)opt.headers.Authorization='Bearer '+token;const r=await fetch(url,opt);const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Habaye ikibazo');return d}
 function side(id,ico,label){return `<button class="navItem ${location.hash==='#'+id?'active':''}" onclick="page('${id}')"><b>${ico}</b><span>${label}</span></button>`}
@@ -108,19 +111,23 @@ async function openMedia(id){
           alt="${esc(x.title)}"
           loading="eager">
       `;
-    }else{
-      player = `
-        <video
-          class="detailVideo"
-          ${poster ? `poster="${esc(poster)}"` : ''}
-          controls
-          playsinline
-          preload="metadata">
-          <source src="${esc(src)}" type="video/mp4">
-          Browser yawe ntishoboye gukina iyi video.
-        </video>
-      `;
-    }
+   }else{
+  player=`
+    <video
+      class="detailVideo"
+      ${poster ? `poster="${esc(poster)}"` : ''}
+      controls
+      playsinline
+      preload="metadata"
+      crossorigin="anonymous"
+      style="width:100%;max-width:100%;background:#000;">
+
+      <source src="${esc(src)}">
+
+      Browser yawe ntishoboye gukina iyi video.
+    </video>
+  `;
+}
 
     const comments = await api('/api/media/' + id + '/comments').catch(() => []);
 
@@ -573,7 +580,7 @@ async function tiktok(){
   controls
   playsinline
   preload="metadata">
-  <source src="${esc(mediaUrl(x.filename))}" type="video/mp4">
+ <source src="${esc(mediaUrl(x.filename))}">
   Browser yawe ntishoboye gukina iyi video.
 </video>
           </div>
