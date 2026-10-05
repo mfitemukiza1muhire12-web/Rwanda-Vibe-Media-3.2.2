@@ -1,6 +1,9 @@
 const express=require('express');
 const path=require('path');
 const fs=require('fs');
+const os=require('os');
+const {spawn}=require('child_process');
+const ffmpegPath=require('ffmpeg-static');
 const bcrypt=require('bcryptjs');
 const jwt=require('jsonwebtoken');
 const multer=require('multer');
@@ -298,7 +301,96 @@ function getMediaContentType(file){
 
   return types[ext] || file?.mimetype || 'application/octet-stream';
 }
+async function generateVideoThumbnail(file){
+  if(!file || !file.buffer){
+    throw new Error('Video buffer ntibonetse');
+  }
 
+  if(!ffmpegPath){
+    throw new Error('FFmpeg ntabwo yabonetse kuri server');
+  }
+
+  const tempDir=fs.mkdtempSync(
+    path.join(os.tmpdir(),'media-thumbnail-')
+  );
+
+  const inputPath=path.join(tempDir,'input');
+  const outputPath=path.join(tempDir,'thumbnail.jpg');
+
+  try{
+    // Bika video by'agateganyo
+    fs.writeFileSync(inputPath,file.buffer);
+
+    await new Promise((resolve,reject)=>{
+
+      const args=[
+        '-y',
+
+        // Fata frame hafi y'isogonda rya 1
+        '-ss','1',
+
+        '-i',inputPath,
+
+        // Kora JPG imwe gusa
+        '-frames:v','1',
+
+        // Thumbnail width = 1280
+        '-vf','scale=1280:-2',
+
+        // JPG quality
+        '-q:v','2',
+
+        outputPath
+      ];
+
+      const process=spawn(ffmpegPath,args);
+
+      let stderr='';
+
+      process.stderr.on('data',data=>{
+        stderr+=data.toString();
+      });
+
+      process.on('error',err=>{
+        reject(err);
+      });
+
+      process.on('close',code=>{
+
+        if(code===0 && fs.existsSync(outputPath)){
+          resolve();
+        }else{
+          reject(
+            new Error(
+              `FFmpeg thumbnail failed. code=${code} ${stderr.slice(-1500)}`
+            )
+          );
+        }
+
+      });
+
+    });
+
+    const thumbnailBuffer=fs.readFileSync(outputPath);
+
+    return {
+      buffer:thumbnailBuffer,
+      mimetype:'image/jpeg',
+      originalname:'thumbnail.jpg',
+      size:thumbnailBuffer.length
+    };
+
+  }finally{
+
+    try{
+      fs.rmSync(tempDir,{
+        recursive:true,
+        force:true
+      });
+    }catch{}
+
+  }
+}
 async function uploadToR2(file,key){
   if(!r2){
     throw new Error(
@@ -567,98 +659,135 @@ app.post('/api/media',auth,upload.fields([
     });
   }
 
-  const fileKey=`media/${makeSafeFileName(f.originalname)}`;
+ const fileKey=`media/${makeSafeFileName(f.originalname)}`;
 
-  const posterKey=p
-    ? `posters/${makeSafeFileName(p.originalname)}`
-    : '';
+let posterFile=p;
+let posterKey='';
 
-  try{
+try{
 
-    // =========================
-    // CLOUDFlARE R2
-    // =========================
+  // =====================================================
+  // AUTOMATIC VIDEO THUMBNAIL
+  // =====================================================
 
-    await uploadToR2(f,fileKey);
+  if(!posterFile && (type==='video' || type==='film')){
 
-    if(p){
-      await uploadToR2(p,posterKey);
-    }
+    console.log('Generating automatic video thumbnail...');
 
-    // =========================
-    // SAVE DATABASE
-    // =========================
+    posterFile=await generateVideoThumbnail(f);
 
-    const r=db.prepare(`
-      INSERT INTO media(
-        title,
-        description,
-        type,
-        genre,
-        year,
-        filename,
-        poster,
-        user_id,
-        status,
-        updated_at
-      )
-      VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-    `).run(
-      String(b.title).trim().slice(0,200),
-      String(b.description||'').slice(0,3000),
-      type,
-      String(
-        category!=='normal'
-          ? category
-          : (b.genre||'')
-      ).slice(0,100),
-      b.year ? Number(b.year) : null,
-      fileKey,
-      posterKey,
-      req.user.id,
-      'pending'
-    );
+    posterKey=`posters/${makeSafeFileName(
+      `${f.originalname}.jpg`
+    )}`;
 
-    const id=r.lastInsertRowid;
+    console.log('Automatic thumbnail generated:',posterKey);
 
-    console.log('R2 MEDIA UPLOAD SUCCESS:',{
-      id,
-      fileKey,
-      posterKey,
-      type,
-      mimetype:f.mimetype,
-      size:f.size
-    });
+  }else if(posterFile){
 
-    res.json({
-      ok:true,
-      id,
-      status:'pending',
-      message:'Media yashyizwe muri Admin Review'
-    });
+    // Umuntu yashyizemo poster ye
+    posterKey=`posters/${makeSafeFileName(
+      posterFile.originalname
+    )}`;
 
-  }catch(err){
-
-    console.error('R2 media upload error:',{
-      name:err.name,
-      code:err.Code||err.code,
-      status:err.$metadata?.httpStatusCode,
-      message:err.message
-    });
-
-    // Niba video yaragiye muri R2 ariko DB ikanga
-    await deleteFromR2(fileKey);
-
-    if(posterKey){
-      await deleteFromR2(posterKey);
-    }
-
-    res.status(500).json({
-      error:'Kubika media kuri Cloudflare R2 byanze',
-      detail:err.message
-    });
   }
-});
+
+  // =====================================================
+  // UPLOAD VIDEO TO R2
+  // =====================================================
+
+  await uploadToR2(f,fileKey);
+
+  // =====================================================
+  // UPLOAD POSTER / AUTOMATIC THUMBNAIL TO R2
+  // =====================================================
+
+  if(posterFile){
+    await uploadToR2(posterFile,posterKey);
+  }
+
+  // =====================================================
+  // SAVE DATABASE
+  // =====================================================
+
+  const r=db.prepare(`
+    INSERT INTO media(
+      title,
+      description,
+      type,
+      genre,
+      year,
+      filename,
+      poster,
+      user_id,
+      status,
+      updated_at
+    )
+    VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+  `).run(
+    String(b.title).trim().slice(0,200),
+
+    String(b.description||'').slice(0,3000),
+
+    type,
+
+    String(
+      category!=='normal'
+        ? category
+        : (b.genre||'')
+    ).slice(0,100),
+
+    b.year ? Number(b.year) : null,
+
+    fileKey,
+
+    posterKey,
+
+    req.user.id,
+
+    'pending'
+  );
+
+  const id=r.lastInsertRowid;
+
+  console.log('R2 MEDIA UPLOAD SUCCESS:',{
+    id,
+    fileKey,
+    posterKey,
+    type,
+    mimetype:f.mimetype,
+    size:f.size,
+    automaticThumbnail:!p && !!posterKey
+  });
+
+  res.json({
+    ok:true,
+    id,
+    status:'pending',
+    poster:posterKey,
+    message:'Media yashyizwe muri Admin Review'
+  });
+
+}catch(err){
+
+  console.error('R2 media upload error:',{
+    name:err.name,
+    code:err.Code||err.code,
+    status:err.$metadata?.httpStatusCode,
+    message:err.message
+  });
+
+  await deleteFromR2(fileKey);
+
+  if(posterKey){
+    await deleteFromR2(posterKey);
+  }
+
+  res.status(500).json({
+    error:'Kubika media kuri Cloudflare R2 byanze',
+    detail:err.message
+  });
+
+}
  
 app.put('/api/media/:id',auth,admin,upload.fields([
   {name:'file',maxCount:1},
