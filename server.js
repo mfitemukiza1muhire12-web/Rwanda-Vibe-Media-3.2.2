@@ -896,6 +896,31 @@ app.put('/api/media/:id',auth,admin,upload.fields([
       detail:err.message
     });
   }
+   }catch(err){
+
+    console.error('R2 media upload error:',{
+      name:err.name,
+      code:err.Code||err.code,
+      status:err.$metadata?.httpStatusCode,
+      message:err.message
+    });
+
+    await deleteFromR2(fileKey);
+
+    if(posterKey){
+      await deleteFromR2(posterKey);
+    }
+
+    res.status(500).json({
+      error:'Kubika media kuri Cloudflare R2 byanze',
+      detail:err.message
+    });
+
+  }
+
+}); // <-- IYI NIYO YARI IBURA
+
+app.put('/api/media/:id',auth,admin,upload.fields([ 
 });
 // Private one-to-one chat: WhatsApp-style conversations backed by SQLite.
 // This uses short polling so it works on a normal Render Web Service without WebSockets.
