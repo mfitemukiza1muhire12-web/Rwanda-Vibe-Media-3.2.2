@@ -781,14 +781,12 @@ try{
     await deleteFromR2(posterKey);
   }
 
-    res.status(500).json({
-      error:'Kubika media kuri Cloudflare R2 byanze',
-      detail:err.message
-    });
-
-  }
-
-});  // <-- route ifungwa hano
+     res.status(500).json({
+    error:'Kubika media kuri Cloudflare R2 byanze',
+    detail:err.message
+  });
+}
+});
 // Private one-to-one chat: WhatsApp-style conversations backed by SQLite.
 // This uses short polling so it works on a normal Render Web Service without WebSockets.
 function getChatForUsers(a,b){
