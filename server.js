@@ -1,111 +1,19 @@
 const express=require('express');
 const path=require('path');
 const fs=require('fs');
-const os=require('os');
-const {spawn}=require('child_process');
-const ffmpegPath=require('ffmpeg-static');
 const bcrypt=require('bcryptjs');
 const jwt=require('jsonwebtoken');
 const multer=require('multer');
-const {S3Client,PutObjectCommand,DeleteObjectCommand}=require('@aws-sdk/client-s3');
 const {DatabaseSync}=require('node:sqlite');
 
-const upload = multer({
-  storage: multer.memoryStorage()
-});
-
 const app=express();
-
 const PORT=Number(process.env.PORT||3000);
-const SECRET=process.env.JWT_SECRET||'change-this-secret-in-production';
-
-const R2_ACCOUNT_ID = String(process.env.R2_ACCOUNT_ID || '').trim();
-const R2_ACCESS_KEY_ID = String(process.env.R2_ACCESS_KEY_ID || '').trim();
-const R2_SECRET_ACCESS_KEY = String(process.env.R2_SECRET_ACCESS_KEY || '').trim();
-const R2_BUCKET_NAME = String(
-  process.env.R2_BUCKET_NAME || 'rwanda-vibe-media'
-).trim();
-
-const R2_ENDPOINT = String(
-  process.env.R2_ENDPOINT ||
-  `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
-).trim();
-const R2_PUBLIC_URL = String(process.env.R2_PUBLIC_URL || '')
-  .trim()
-  .replace(/\/$/, '');
-
-console.log('R2 DEBUG:', {
-  accountLength: R2_ACCOUNT_ID.length,
-  accessLength: R2_ACCESS_KEY_ID.length,
-  accessFirst4: R2_ACCESS_KEY_ID.slice(0, 4),
-  accessLast4: R2_ACCESS_KEY_ID.slice(-4),
-  accessHasWhitespace: /\s/.test(R2_ACCESS_KEY_ID),
-  accessHasNonAscii: /[^\x00-\x7F]/.test(R2_ACCESS_KEY_ID),
-  accessHasControl: /[\x00-\x1F\x7F]/.test(R2_ACCESS_KEY_ID),
-
-  secretLength: R2_SECRET_ACCESS_KEY.length,
-  secretHasWhitespace: /\s/.test(R2_SECRET_ACCESS_KEY),
-  secretHasNonAscii: /[^\x00-\x7F]/.test(R2_SECRET_ACCESS_KEY),
-  secretHasControl: /[\x00-\x1F\x7F]/.test(R2_SECRET_ACCESS_KEY),
-
-  endpoint: R2_ENDPOINT,
-  endpointHasControl: /[\x00-\x1F\x7F]/.test(R2_ENDPOINT),
-
-  bucket: R2_BUCKET_NAME
-});
-const r2 = (
-  R2_ACCOUNT_ID &&
-  R2_ACCESS_KEY_ID &&
-  R2_SECRET_ACCESS_KEY
-)
-  ? new S3Client({
-      region: 'auto',
-      endpoint: R2_ENDPOINT,
-      credentials: {
-        accessKeyId: R2_ACCESS_KEY_ID,
-        secretAccessKey: R2_SECRET_ACCESS_KEY
-      }
-    })
-  : null;
-
-console.log('R2 client ready:', !!r2);
-
-console.log('R2 CREDENTIAL CHECK:', {
-  accessLength: R2_ACCESS_KEY_ID.length,
-  accessClean: /^[A-Za-z0-9]+$/.test(R2_ACCESS_KEY_ID),
-  secretLength: R2_SECRET_ACCESS_KEY.length,
-  secretClean: /^[A-Za-z0-9+/=_-]+$/.test(R2_SECRET_ACCESS_KEY),
-  accessCodes: [...R2_ACCESS_KEY_ID].map(c => c.charCodeAt(0)),
-  secretBadCodes: [...R2_SECRET_ACCESS_KEY]
-    .map(c => c.charCodeAt(0))
-    .filter(n => n < 32 || n === 127)
-});
+const SECRET=process.env.JWT_SECRET||'MEDIA-RWANDA-change-this-secret-in-production';
 const ROOT=__dirname;
-
-// Render Persistent Disk
-const UP='/uploads';
-const DISK_DB=path.join(UP,'media-rwanda.db');
-const OLD_DB=path.join(ROOT,'media-rwanda.db');
-
+const UP=path.join(ROOT,'uploads');
 fs.mkdirSync(UP,{recursive:true});
 
-// One-time migration:
-// Niba database yari iri muri project root, yimurire kuri Persistent Disk.
-if(!fs.existsSync(DISK_DB) && fs.existsSync(OLD_DB)){
-  fs.copyFileSync(OLD_DB,DISK_DB);
-
-  // SQLite WAL ishobora kuba ifite amakuru atarashyirwa muri main DB.
-  const oldWal=OLD_DB+'-wal';
-  const newWal=DISK_DB+'-wal';
-
-  if(fs.existsSync(oldWal)){
-    fs.copyFileSync(oldWal,newWal);
-  }
-
-  console.log('SQLite database migrated to Render Persistent Disk:',DISK_DB);
-}
-
-const db=new DatabaseSync(DISK_DB);
+const db=new DatabaseSync(path.join(ROOT,'media-rwanda.db'));
 db.exec(`
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,email TEXT UNIQUE NOT NULL,password TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'user',avatar TEXT DEFAULT '',bio TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -154,354 +62,30 @@ if(!db.prepare('SELECT id FROM users WHERE email=?').get('admin@mediarwanda.com'
 
 app.use(express.json({limit:'3mb'}));
 app.use(express.urlencoded({extended:true}));
-app.use(express.static(ROOT));
-app.use('/uploads',express.static(UP,{
-  maxAge:'1d',
-  acceptRanges:true
-}));
+app.use(express.static(path.join(ROOT,'public')));
+app.use('/uploads',express.static(UP,{maxAge:'1d'}));
+
+const storage=multer.diskStorage({destination:(_,__,cb)=>cb(null,UP),filename:(_,file,cb)=>{
+  const ext=path.extname(file.originalname).toLowerCase();
+  const base=path.basename(file.originalname,ext).replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,70)||'media';
+  cb(null,`${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}${ext}`);
+}});
+const upload=multer({storage,limits:{fileSize:1024*1024*1024}});
 
 function auth(req,res,next){try{const h=req.headers.authorization||'';if(!h.startsWith('Bearer '))throw 0;req.user=jwt.verify(h.slice(7),SECRET);const u=db.prepare('SELECT id,role,disabled FROM users WHERE id=?').get(req.user.id);if(!u||u.disabled)throw 0;req.user.role=u.role;next()}catch{res.status(401).json({error:'Login required'})}}
 function admin(req,res,next){if(req.user?.role!=='admin')return res.status(403).json({error:'Admin only'});next()}
 function safeUser(id){return db.prepare('SELECT id,name,email,role,avatar,bio,created_at FROM users WHERE id=?').get(id)}
-function mediaList(type){
-  const rows=db.prepare(`
-    SELECT m.*,u.name author,u.avatar author_avatar,
-      (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id) likes,
-      (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id) comments
-    FROM media m
-    LEFT JOIN users u ON u.id=m.user_id
-    ${type
-      ?"WHERE m.type=? AND m.status='published'"
-      :"WHERE m.status='published'"
-    }
-    ORDER BY datetime(m.created_at) DESC
-  `).all(...(type?[type]:[]));
-
-  return rows.map(m=>({
-    ...m,
-    filename:r2Url(m.filename),
-    poster:r2Url(m.poster)
-  }));
-}
- 
-function postList(){
-  const rows=db.prepare(`
-    SELECT p.*,u.name author,u.avatar author_avatar,
-      m.title media_title,
-      m.type media_type,
-      m.filename media_filename,
-      m.poster media_poster,
-      (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) likes,
-      (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id=p.id) comments
-    FROM posts p
-    JOIN users u ON u.id=p.user_id
-    LEFT JOIN media m ON m.id=p.media_id
-    ORDER BY p.created_at DESC
-    LIMIT 100
-  `).all();
-
-  return rows.map(p=>({
-    ...p,
-    media_filename:r2Url(p.media_filename),
-    media_poster:r2Url(p.media_poster)
-  }));
-}
-
-function removeFile(name){
-  if(name){
-    try{
-      const clean=String(name).replace(/^\/+/,'');
-      const full=path.resolve(UP,clean);
-      const root=path.resolve(UP);
-
-      if(full===root || !full.startsWith(root+path.sep)){
-        return;
-      }
-
-      fs.unlinkSync(full);
-    }catch{}
-  }
-}
-
-function diskPath(key){
-  const clean=String(key||'').replace(/^\/+/,'');
-  const full=path.resolve(UP,clean);
-  const root=path.resolve(UP);
-
-  if(full===root || !full.startsWith(root+path.sep)){
-    throw new Error('Invalid file path');
-  }
-
-  return full;
-}
-
-async function uploadToDisk(file,key){
-  if(!file || !file.buffer){
-    throw new Error('File buffer ntibonetse');
-  }
-
-  const target=diskPath(key);
-
-  fs.mkdirSync(path.dirname(target),{recursive:true});
-  fs.writeFileSync(target,file.buffer);
-
-  return key;
-}
-
-function r2Url(key){
-  if(!key) return '';
-
-  const s=String(key).trim();
-
-  // Niba ari URL yuzuye, yisubize uko iri
-  if(/^https?:\/\//i.test(s)){
-    return s;
-  }
-
-  // R2 public URL
-  if(R2_PUBLIC_URL){
-    return `${R2_PUBLIC_URL}/${s.replace(/^\/+/,'')}`;
-  }
-
-  return s;
-}
-
-function makeSafeFileName(original){
-  const ext=path.extname(original).toLowerCase();
-
-  const base=path.basename(original,ext)
-    .replace(/[^a-zA-Z0-9_-]/g,'_')
-    .slice(0,70)||'media';
-
-  return `${Date.now()}-${Math.random().toString(36).slice(2,8)}-${base}${ext}`;
-}
-
-function getMediaContentType(file){
-  const ext=path.extname(file?.originalname||'').toLowerCase();
-
-  const types={
-    '.mp4':'video/mp4',
-    '.m4v':'video/mp4',
-    '.webm':'video/webm',
-    '.ogv':'video/ogg',
-    '.ogg':'video/ogg',
-
-    '.mp3':'audio/mpeg',
-    '.m4a':'audio/mp4',
-    '.wav':'audio/wav',
-    '.aac':'audio/aac',
-
-    '.jpg':'image/jpeg',
-    '.jpeg':'image/jpeg',
-    '.png':'image/png',
-    '.webp':'image/webp',
-    '.gif':'image/gif'
-  };
-
-  return types[ext] || file?.mimetype || 'application/octet-stream';
-}
-async function generateVideoThumbnail(file){
-  if(!file || !file.buffer){
-    throw new Error('Video buffer ntibonetse');
-  }
-
-  if(!ffmpegPath){
-    throw new Error('FFmpeg ntabwo yabonetse kuri server');
-  }
-
-  const tempDir=fs.mkdtempSync(
-    path.join(os.tmpdir(),'media-thumbnail-')
-  );
-
-  const inputPath=path.join(tempDir,'input');
-  const outputPath=path.join(tempDir,'thumbnail.jpg');
-
-  try{
-    // Bika video by'agateganyo
-    fs.writeFileSync(inputPath,file.buffer);
-
-    await new Promise((resolve,reject)=>{
-
-      const args=[
-        '-y',
-
-        // Fata frame hafi y'isogonda rya 1
-        '-ss','1',
-
-        '-i',inputPath,
-
-        // Kora JPG imwe gusa
-        '-frames:v','1',
-
-        // Thumbnail width = 1280
-        '-vf','scale=1280:-2',
-
-        // JPG quality
-        '-q:v','2',
-
-        outputPath
-      ];
-
-      const process=spawn(ffmpegPath,args);
-
-      let stderr='';
-
-      process.stderr.on('data',data=>{
-        stderr+=data.toString();
-      });
-
-      process.on('error',err=>{
-        reject(err);
-      });
-
-      process.on('close',code=>{
-
-        if(code===0 && fs.existsSync(outputPath)){
-          resolve();
-        }else{
-          reject(
-            new Error(
-              `FFmpeg thumbnail failed. code=${code} ${stderr.slice(-1500)}`
-            )
-          );
-        }
-
-      });
-
-    });
-
-    const thumbnailBuffer=fs.readFileSync(outputPath);
-
-    return {
-      buffer:thumbnailBuffer,
-      mimetype:'image/jpeg',
-      originalname:'thumbnail.jpg',
-      size:thumbnailBuffer.length
-    };
-
-  }finally{
-
-    try{
-      fs.rmSync(tempDir,{
-        recursive:true,
-        force:true
-      });
-    }catch{}
-
-  }
-}
-async function uploadToR2(file,key){
-  if(!r2){
-    throw new Error(
-      'Cloudflare R2 ntabwo yateguwe neza.'
-    );
-  }
-
-  if(!file || !file.buffer){
-    throw new Error('File buffer ntibonetse');
-  }
-
-  const contentType=getMediaContentType(file);
-
-  await r2.send(new PutObjectCommand({
-    Bucket:R2_BUCKET_NAME,
-    Key:key,
-    Body:file.buffer,
-    ContentType:contentType,
-    CacheControl:'public, max-age=31536000'
-  }));
-
-  console.log('R2 PUT SUCCESS:',{
-    key,
-    contentType,
-    originalName:file.originalname,
-    size:file.size
-  });
-
-  return key;
-}
-
-async function deleteFromR2(key){
-  if(!r2 || !key) return;
-
-  try{
-    await r2.send(new DeleteObjectCommand({
-      Bucket:R2_BUCKET_NAME,
-      Key:key
-    }));
-  }catch{}
-}
-
-async function deleteMediaFile(key){
-  if(!key) return;
-
-  // Render Disk file
-  if(/^\/uploads\//i.test(String(key))){
-    try{
-      fs.unlinkSync(diskPath(key));
-    }catch{}
-    return;
-  }
-
-  // R2 file ya kera
-  await deleteFromR2(key);
-}
-
-app.get('/api/health',(_,res)=>res.json({
-  ok:true,
-  app:'MEDIA RWANDA',
-  version:'3.2.2',
-  database:'SQLite'
-}));
-
-app.get('/api/r2-status',(req,res)=>{
-  res.json({
-    account_id:!!R2_ACCOUNT_ID,
-    access_key:!!R2_ACCESS_KEY_ID,
-    secret_key:!!R2_SECRET_ACCESS_KEY,
-    bucket:R2_BUCKET_NAME,
-    endpoint:R2_ENDPOINT,
-    public_url:R2_PUBLIC_URL,
-    r2_ready:!!r2
-  });
-});
-app.get('/api/r2-test', auth, admin, async (req, res) => {
-  try {
-    const key = `_r2-test/test-${Date.now()}.txt`;
-
-    await r2.send(new PutObjectCommand({
-      Bucket: R2_BUCKET_NAME,
-      Key: key,
-      Body: Buffer.from('Rwanda Vibe Media R2 test'),
-      ContentType: 'text/plain'
-    }));
-
-    console.log('R2 DIRECT TEST: SUCCESS', key);
-
-    res.json({
-      ok: true,
-      message: 'Cloudflare R2 ikora neza',
-      key
-    });
-
-  } catch (err) {
-    console.error('R2 DIRECT TEST ERROR:', {
-      name: err.name,
-      code: err.Code || err.code,
-      status: err.$metadata?.httpStatusCode,
-      message: err.message
-    });
-
-    res.status(500).json({
-      ok: false,
-      name: err.name,
-      code: err.Code || err.code,
-      status: err.$metadata?.httpStatusCode,
-      message: err.message
-    });
-  }
-});
-
+function mediaList(type){return db.prepare(`SELECT m.*,u.name author,u.avatar author_avatar,
+ (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id) likes,
+ (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id) comments
+ FROM media m LEFT JOIN users u ON u.id=m.user_id ${type?'WHERE m.type=? AND m.status=\'published\'':'WHERE m.status=\'published\''} ORDER BY datetime(m.created_at) DESC`).all(...(type?[type]:[]))}
+function postList(){return db.prepare(`SELECT p.*,u.name author,u.avatar author_avatar,m.title media_title,m.type media_type,m.filename media_filename,m.poster media_poster,
+ (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) likes,
+ (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id=p.id) comments
+ FROM posts p JOIN users u ON u.id=p.user_id LEFT JOIN media m ON m.id=p.media_id ORDER BY p.created_at DESC LIMIT 100`).all()}
+function removeFile(name){if(name)try{fs.unlinkSync(path.join(UP,name))}catch{}}
+
+app.get('/api/health',(_,res)=>res.json({ok:true,app:'MEDIA RWANDA',version:'3.2.2',database:'SQLite'}));
 app.post('/api/register',(req,res)=>{const name=String(req.body.name||'').trim();const email=String(req.body.email||'').trim().toLowerCase();const password=String(req.body.password||'');if(name.length<2||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||password.length<6)return res.status(400).json({error:'Amazina, email nyayo na password yibura inyuguti 6 birakenewe'});try{const r=db.prepare('INSERT INTO users(name,email,password) VALUES(?,?,?)').run(name,email,bcrypt.hashSync(password,10));const u=safeUser(r.lastInsertRowid);res.json({token:jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role},SECRET,{expiresIn:'30d'}),user:u})}catch{res.status(409).json({error:'Iyo email isanzwe ikoreshwa'})}});
 app.post('/api/login',(req,res)=>{const email=String(req.body.email||'').trim().toLowerCase();const password=String(req.body.password||'');const u=db.prepare('SELECT * FROM users WHERE email=?').get(email);if(!u||!bcrypt.compareSync(password,u.password))return res.status(401).json({error:'Email cyangwa password si byo'});res.json({token:jwt.sign({id:u.id,name:u.name,email:u.email,role:u.role},SECRET,{expiresIn:'30d'}),user:safeUser(u.id)})});
 app.get('/api/me',auth,(req,res)=>res.json(safeUser(req.user.id)));
@@ -509,284 +93,19 @@ app.get('/api/users/:id',(req,res)=>{const u=safeUser(req.params.id);if(!u)retur
 app.post('/api/users/:id/follow',auth,(req,res)=>{const id=Number(req.params.id);if(id===req.user.id)return res.status(400).json({error:'Ntushobora kwifollowinga'});const x=db.prepare('SELECT id FROM follows WHERE follower_id=? AND following_id=?').get(req.user.id,id);if(x)db.prepare('DELETE FROM follows WHERE id=?').run(x.id);else db.prepare('INSERT OR IGNORE INTO follows(follower_id,following_id) VALUES(?,?)').run(req.user.id,id);res.json({following:!x})});
 
 app.get('/api/site/stats',(req,res)=>res.json({updated:new Date().toISOString(),published:db.prepare("SELECT COUNT(*) c FROM media WHERE status='published'").get().c}));
-app.get('/api/media/latest',(req,res)=>{
-  const days=Math.max(1,Math.min(30,Number(req.query.days)||7));
-
-  const rows=db.prepare(`
-    SELECT m.*,u.name author,u.avatar author_avatar,
-      (SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,
-      (SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments
-    FROM media m
-    LEFT JOIN users u ON u.id=m.user_id
-    WHERE m.status='published'
-      AND datetime(m.created_at)>=datetime('now',?)
-    ORDER BY datetime(m.created_at) DESC
-    LIMIT 100
-  `).all(`-${days} days`);
-
-  res.json(rows.map(m=>({
-    ...m,
-    filename:r2Url(m.filename),
-    poster:r2Url(m.poster)
-  })));
-});
-app.get('/api/media/section/:section',(req,res)=>{
-  const section=String(req.params.section);
-
-  const order=
-    section==='popular'
-      ? '(m.views + (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id)*5) DESC, datetime(m.created_at) DESC'
-      : section==='trending'
-        ? '(m.views*2 + (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id)*5 + (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id)*3) DESC, datetime(m.created_at) DESC'
-        : 'datetime(m.created_at) DESC';
-
-  const where=
-    section==='latest'
-      ? "m.status='published'"
-      : section==='old'
-        ? "m.status='published' AND datetime(m.created_at)<datetime('now','-30 days')"
-        : "m.status='published'";
-
-  const rows=db.prepare(`
-    SELECT m.*,u.name author,u.avatar author_avatar,
-      (SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,
-      (SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments
-    FROM media m
-    LEFT JOIN users u ON u.id=m.user_id
-    WHERE ${where}
-    ORDER BY ${order}
-    LIMIT 100
-  `).all();
-
-  res.json(rows.map(m=>({
-    ...m,
-    filename:r2Url(m.filename),
-    poster:r2Url(m.poster)
-  })));
-});
-app.get('/api/media/category/:category',(req,res)=>{
-  const c=String(req.params.category);
-
-  const allowed=['gospel-video','gospel-audio','comedy'];
-
-  if(!allowed.includes(c)){
-    return res.status(400).json({
-      error:'Category itemewe'
-    });
-  }
-
-  const rows=db.prepare(`
-    SELECT m.*,u.name author,u.avatar author_avatar,
-      (SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,
-      (SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments
-    FROM media m
-    LEFT JOIN users u ON u.id=m.user_id
-    WHERE m.status='published'
-      AND m.genre=?
-    ORDER BY datetime(m.created_at) DESC
-  `).all(c);
-
-  res.json(rows.map(m=>({
-    ...m,
-    filename:r2Url(m.filename),
-    poster:r2Url(m.poster)
-  })));
-});
+app.get('/api/media/latest',(req,res)=>{const days=Math.max(1,Math.min(30,Number(req.query.days)||7));res.json(db.prepare("SELECT m.*,u.name author,u.avatar author_avatar,(SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,(SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments FROM media m LEFT JOIN users u ON u.id=m.user_id WHERE m.status='published' AND datetime(m.created_at)>=datetime('now',?) ORDER BY datetime(m.created_at) DESC LIMIT 100").all(`-${days} days`));});
+app.get('/api/media/section/:section',(req,res)=>{const section=String(req.params.section);const order=section==='popular'?'(m.views + (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id)*5) DESC, datetime(m.created_at) DESC':section==='trending'?'(m.views*2 + (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id)*5 + (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id)*3) DESC, datetime(m.created_at) DESC':'datetime(m.created_at) DESC';const where=section==='latest'?"m.status='published'":section==='old'?"m.status='published' AND datetime(m.created_at)<datetime('now','-30 days')":"m.status='published'";res.json(db.prepare(`SELECT m.*,u.name author,u.avatar author_avatar,(SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,(SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments FROM media m LEFT JOIN users u ON u.id=m.user_id WHERE ${where} ORDER BY ${order} LIMIT 100`).all());});
+app.get('/api/media/category/:category',(req,res)=>{const c=String(req.params.category);const allowed=['gospel-video','gospel-audio','comedy'];if(!allowed.includes(c))return res.status(400).json({error:'Category itemewe'});const rows=db.prepare(`SELECT m.*,u.name author,u.avatar author_avatar,(SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,(SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments FROM media m LEFT JOIN users u ON u.id=m.user_id WHERE m.status='published' AND m.genre=? ORDER BY datetime(m.created_at) DESC`).all(c);res.json(rows);});
 app.get('/api/media',(req,res)=>res.json(mediaList(['film','video','photo','music'].includes(req.query.type)?req.query.type:null)));
-app.get('/api/media/:id',(req,res)=>{
-  const m=db.prepare(`
-    SELECT m.*,u.name author,u.avatar author_avatar,
-      (SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,
-      (SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments
-    FROM media m
-    LEFT JOIN users u ON u.id=m.user_id
-    WHERE m.id=? AND m.status='published'
-  `).get(req.params.id);
-
-  if(!m){
-    return res.status(404).json({
-      error:'Content ntibonetse'
-    });
-  }
-
-  db.prepare('UPDATE media SET views=views+1 WHERE id=?')
-    .run(req.params.id);
-
-  res.json({
-    ...m,
-    filename:r2Url(m.filename),
-    poster:r2Url(m.poster),
-    views:m.views+1
-  });
-});
+app.get('/api/media/:id',(req,res)=>{const m=db.prepare(`SELECT m.*,u.name author,u.avatar author_avatar,(SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,(SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments FROM media m LEFT JOIN users u ON u.id=m.user_id WHERE m.id=? AND m.status='published'`).get(req.params.id);if(!m)return res.status(404).json({error:'Content ntibonetse'});db.prepare('UPDATE media SET views=views+1 WHERE id=?').run(req.params.id);res.json({...m,views:m.views+1})});
 app.get('/api/media/:id/comments',(req,res)=>res.json(db.prepare('SELECT c.*,u.name FROM comments c JOIN users u ON u.id=c.user_id WHERE c.media_id=? ORDER BY c.created_at DESC').all(req.params.id)));
 app.post('/api/media/:id/comments',auth,(req,res)=>{const text=String(req.body.text||'').trim();if(!text)return res.status(400).json({error:'Comment ntishobora kuba ubusa'});db.prepare('INSERT INTO comments(media_id,user_id,text) VALUES(?,?,?)').run(req.params.id,req.user.id,text.slice(0,1000));res.json({ok:true})});
 app.post('/api/media/:id/like',auth,(req,res)=>{const x=db.prepare('SELECT id FROM likes WHERE media_id=? AND user_id=?').get(req.params.id,req.user.id);if(x)db.prepare('DELETE FROM likes WHERE id=?').run(x.id);else db.prepare('INSERT OR IGNORE INTO likes(media_id,user_id) VALUES(?,?)').run(req.params.id,req.user.id);res.json({liked:!x})});
-app.post('/api/media',auth,upload.fields([
-  {name:'file',maxCount:1},
-  {name:'poster',maxCount:1}
-]),async(req,res)=>{
+app.post('/api/media',auth,upload.fields([{name:'file',maxCount:1},{name:'poster',maxCount:1}]),(req,res)=>{const f=req.files?.file?.[0],p=req.files?.poster?.[0],b=req.body||{};const type=String(b.type||'');const category=String(b.category||'normal');if(category==='gospel-video'&&type!=='video')return res.status(400).json({error:'Gospel Video igomba kuba Video'});if(category==='gospel-audio'&&type!=='music')return res.status(400).json({error:'Gospel Audio igomba kuba Music'});if(category==='comedy'&&type!=='video')return res.status(400).json({error:'Comedy igomba kuba Video'});if(!f||!b.title||!['film','video','photo','music'].includes(type)){if(f)removeFile(f.filename);return res.status(400).json({error:'Title, type na file birakenewe'})}db.prepare("INSERT INTO media(title,description,type,genre,year,filename,poster,user_id,status,updated_at) VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)").run(String(b.title).trim().slice(0,200),String(b.description||'').slice(0,3000),type,String(category!=='normal'?category:(b.genre||'')).slice(0,100),b.year?Number(b.year):null,f.filename,p?.filename||'',req.user.id,'pending');const r=db.prepare('SELECT last_insert_rowid() id').get();res.json({ok:true,id:r.id})});
+app.put('/api/media/:id',auth,admin,upload.fields([{name:'file',maxCount:1},{name:'poster',maxCount:1}]),(req,res)=>{const m=db.prepare('SELECT * FROM media WHERE id=?').get(req.params.id);if(!m)return res.status(404).json({error:'Content ntibonetse'});const b=req.body||{},f=req.files?.file?.[0],p=req.files?.poster?.[0];const filename=f?.filename||m.filename,poster=p?.filename||m.poster;db.prepare('UPDATE media SET title=?,description=?,type=?,genre=?,year=?,filename=?,poster=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(String(b.title||m.title).slice(0,200),String(b.description??m.description).slice(0,3000),['film','video','photo','music'].includes(b.type)?b.type:m.type,String(b.genre??m.genre).slice(0,100),b.year?Number(b.year):m.year,filename,poster,m.id);if(f)removeFile(m.filename);if(p)removeFile(m.poster);res.json({ok:true})});
+app.delete('/api/media/:id',auth,admin,(req,res)=>{const m=db.prepare('SELECT filename,poster FROM media WHERE id=?').get(req.params.id);if(!m)return res.status(404).json({error:'Content ntibonetse'});db.prepare('DELETE FROM comments WHERE media_id=?').run(req.params.id);db.prepare('DELETE FROM likes WHERE media_id=?').run(req.params.id);db.prepare('DELETE FROM posts WHERE media_id=?').run(req.params.id);db.prepare('DELETE FROM media WHERE id=?').run(req.params.id);removeFile(m.filename);removeFile(m.poster);res.json({ok:true})});
 
-  const f=req.files?.file?.[0];
-  const p=req.files?.poster?.[0];
-  const b=req.body||{};
 
-  const type=String(b.type||'');
-  const category=String(b.category||'normal');
-
-  if(category==='gospel-video'&&type!=='video'){
-    return res.status(400).json({
-      error:'Gospel Video igomba kuba Video'
-    });
-  }
-
-  if(category==='gospel-audio'&&type!=='music'){
-    return res.status(400).json({
-      error:'Gospel Audio igomba kuba Music'
-    });
-  }
-
-  if(category==='comedy'&&type!=='video'){
-    return res.status(400).json({
-      error:'Comedy igomba kuba Video'
-    });
-  }
-
-  if(!f || !b.title || !['film','video','photo','music'].includes(type)){
-    return res.status(400).json({
-      error:'Title, type na file birakenewe'
-    });
-  }
-
- const fileKey=`media/${makeSafeFileName(f.originalname)}`;
-
-let posterFile=p;
-let posterKey='';
-
-try{
-
-  // =====================================================
-  // AUTOMATIC VIDEO THUMBNAIL
-  // =====================================================
-
-  if(!posterFile && (type==='video' || type==='film')){
-
-    console.log('Generating automatic video thumbnail...');
-
-    posterFile=await generateVideoThumbnail(f);
-
-    posterKey=`posters/${makeSafeFileName(
-      `${f.originalname}.jpg`
-    )}`;
-
-    console.log('Automatic thumbnail generated:',posterKey);
-
-  }else if(posterFile){
-
-    // Umuntu yashyizemo poster ye
-    posterKey=`posters/${makeSafeFileName(
-      posterFile.originalname
-    )}`;
-
-  }
-
-  // =====================================================
-  // UPLOAD VIDEO TO R2
-  // =====================================================
-
-  await uploadToR2(f,fileKey);
-
-  // =====================================================
-  // UPLOAD POSTER / AUTOMATIC THUMBNAIL TO R2
-  // =====================================================
-
-  if(posterFile){
-    await uploadToR2(posterFile,posterKey);
-  }
-
-  // =====================================================
-  // SAVE DATABASE
-  // =====================================================
-
-  const r=db.prepare(`
-    INSERT INTO media(
-      title,
-      description,
-      type,
-      genre,
-      year,
-      filename,
-      poster,
-      user_id,
-      status,
-      updated_at
-    )
-    VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-  `).run(
-    String(b.title).trim().slice(0,200),
-
-    String(b.description||'').slice(0,3000),
-
-    type,
-
-    String(
-      category!=='normal'
-        ? category
-        : (b.genre||'')
-    ).slice(0,100),
-
-    b.year ? Number(b.year) : null,
-
-    fileKey,
-
-    posterKey,
-
-    req.user.id,
-
-    'pending'
-  );
-
-  const id=r.lastInsertRowid;
-
-  console.log('R2 MEDIA UPLOAD SUCCESS:',{
-    id,
-    fileKey,
-    posterKey,
-    type,
-    mimetype:f.mimetype,
-    size:f.size,
-    automaticThumbnail:!p && !!posterKey
-  });
-
-  res.json({
-    ok:true,
-    id,
-    status:'pending',
-    poster:posterKey,
-    message:'Media yashyizwe muri Admin Review'
-  });
-
-}catch(err){
-
-  console.error('R2 media upload error:',{
-    name:err.name,
-    code:err.Code||err.code,
-    status:err.$metadata?.httpStatusCode,
-    message:err.message
-  });
-
-  await deleteFromR2(fileKey);
-
-  if(posterKey){
-    await deleteFromR2(posterKey);
-  }
-
-     res.status(500).json({
-    error:'Kubika media kuri Cloudflare R2 byanze',
-    detail:err.message
-  });
-}
-});
 // Private one-to-one chat: WhatsApp-style conversations backed by SQLite.
 // This uses short polling so it works on a normal Render Web Service without WebSockets.
 function getChatForUsers(a,b){
@@ -862,96 +181,8 @@ app.post('/api/chats/:id/read',auth,(req,res)=>{
   res.json({ok:true});
 });
 
-app.get('/api/feed',(req,res)=>{
-  res.json(postList());
-});
-
-app.post('/api/feed',auth,upload.single('file'),async(req,res)=>{
-  const text=String(req.body?.text||'').trim();
-  const f=req.file;
-
-  if(!text && !f){
-    return res.status(400).json({
-      error:'Andika post cyangwa shyiramo Photo/Video'
-    });
-  }
-
-  let mediaId=null;
-  let fileKey='';
-
-  try{
-    if(f){
-      const isImage=f.mimetype.startsWith('image/');
-      const isVideo=f.mimetype.startsWith('video/');
-
-      if(!isImage && !isVideo){
-        return res.status(400).json({
-          error:'Social Feed yemera Photo cyangwa Video gusa'
-        });
-      }
-
-      const type=isImage?'photo':'video';
-
-      // Bika file kuri Render Persistent Disk
-fileKey=`/uploads/social-feed/${makeSafeFileName(f.originalname)}`;
-
-await uploadToDisk(f,fileKey);
-      // Social Feed media igomba guhita iba published
-      const r=db.prepare(`
-        INSERT INTO media(
-          title,
-          description,
-          type,
-          genre,
-          filename,
-          poster,
-          user_id,
-          status,
-          updated_at
-        )
-        VALUES(?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
-      `).run(
-        'Social Post',
-        text.slice(0,500),
-        type,
-        'social-feed',
-        fileKey,
-        '',
-        req.user.id,
-        'published'
-      );
-
-      mediaId=r.lastInsertRowid;
-    }
-
-    const p=db.prepare(`
-      INSERT INTO posts(user_id,text,media_id)
-      VALUES(?,?,?)
-    `).run(
-      req.user.id,
-      text.slice(0,3000),
-      mediaId
-    );
-
-    res.json({
-      ok:true,
-      id:p.lastInsertRowid,
-      mediaId,
-      message:'Post yashyizwe muri Social Feed'
-    });
-
-  }catch(err){
-    console.error('Social Feed upload error:',err);
-
-   if(fileKey){
-  await deleteMediaFile(fileKey);
-}
-
-    res.status(500).json({
-      error:'Social Feed upload yanze'
-    });
-  }
-});
+app.get('/api/feed',(req,res)=>res.json(postList()));
+app.post('/api/feed',auth,upload.single('file'),(req,res)=>{const text=String(req.body?.text||'').trim();let mediaId=null;if(req.file){const type=req.file.mimetype.startsWith('image/')?'photo':req.file.mimetype.startsWith('video/')?'video':null;if(!type){removeFile(req.file.filename);return res.status(400).json({error:'Post yemera Photo cyangwa Video'})}const r=db.prepare('INSERT INTO media(title,description,type,filename,user_id) VALUES(?,?,?,?,?)').run('Social Post',text.slice(0,500),type,req.file.filename,req.user.id);mediaId=r.lastInsertRowid}if(!text&&!mediaId)return res.status(400).json({error:'Andika post cyangwa shyiramo Photo/Video'});const p=db.prepare('INSERT INTO posts(user_id,text,media_id) VALUES(?,?,?)').run(req.user.id,text.slice(0,3000),mediaId);res.json({ok:true,id:p.lastInsertRowid})});
 app.post('/api/feed/:id/like',auth,(req,res)=>{const x=db.prepare('SELECT id FROM post_likes WHERE post_id=? AND user_id=?').get(req.params.id,req.user.id);if(x)db.prepare('DELETE FROM post_likes WHERE id=?').run(x.id);else db.prepare('INSERT OR IGNORE INTO post_likes(post_id,user_id) VALUES(?,?)').run(req.params.id,req.user.id);res.json({liked:!x})});
 app.get('/api/feed/:id/comments',(req,res)=>res.json(db.prepare('SELECT c.*,u.name FROM post_comments c JOIN users u ON u.id=c.user_id WHERE post_id=? ORDER BY c.created_at DESC').all(req.params.id)));
 app.post('/api/feed/:id/comments',auth,(req,res)=>{const text=String(req.body?.text||'').trim();if(!text)return res.status(400).json({error:'Comment ntishobora kuba ubusa'});db.prepare('INSERT INTO post_comments(post_id,user_id,text) VALUES(?,?,?)').run(req.params.id,req.user.id,text.slice(0,1000));res.json({ok:true})});
@@ -960,36 +191,7 @@ app.get('/api/live',(req,res)=>res.json(db.prepare('SELECT l.*,u.name host FROM 
 app.post('/api/live',auth,(req,res)=>{const title=String(req.body?.title||'').trim();if(!title)return res.status(400).json({error:'Live title irakenewe'});const status=['live','scheduled','ended'].includes(req.body?.status)?req.body.status:'scheduled';const r=db.prepare('INSERT INTO live_rooms(title,description,stream_url,status,host_id) VALUES(?,?,?,?,?)').run(title,String(req.body?.description||'').slice(0,2000),String(req.body?.stream_url||'').slice(0,500),status,req.user.id);res.json({ok:true,id:r.lastInsertRowid})});
 app.delete('/api/live/:id',auth,(req,res)=>{const l=db.prepare('SELECT * FROM live_rooms WHERE id=?').get(req.params.id);if(!l)return res.status(404).json({error:'Live ntibonetse'});if(l.host_id!==req.user.id&&req.user.role!=='admin')return res.status(403).json({error:'Not allowed'});db.prepare('DELETE FROM live_rooms WHERE id=?').run(req.params.id);res.json({ok:true})});
 
-app.get('/api/search',(req,res)=>{
-  const q=String(req.query.q||'').trim();
-
-  if(!q) return res.json([]);
-
-  const like=`%${q}%`;
-
-  const rows=db.prepare(`
-    SELECT m.*,u.name author,
-      (SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,
-      (SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments
-    FROM media m
-    LEFT JOIN users u ON u.id=m.user_id
-    WHERE m.status='published'
-      AND (
-        m.title LIKE ?
-        OR m.description LIKE ?
-        OR m.genre LIKE ?
-        OR u.name LIKE ?
-      )
-    ORDER BY m.created_at DESC
-    LIMIT 100
-  `).all(like,like,like,like);
-
-  res.json(rows.map(m=>({
-    ...m,
-    filename:r2Url(m.filename),
-    poster:r2Url(m.poster)
-  })));
-});
+app.get('/api/search',(req,res)=>{const q=String(req.query.q||'').trim();if(!q)return res.json([]);const like=`%${q}%`;res.json(db.prepare(`SELECT m.*,u.name author,(SELECT COUNT(*) FROM likes WHERE media_id=m.id) likes,(SELECT COUNT(*) FROM comments WHERE media_id=m.id) comments FROM media m LEFT JOIN users u ON u.id=m.user_id WHERE m.status='published' AND (m.title LIKE ? OR m.description LIKE ? OR m.genre LIKE ? OR u.name LIKE ?) ORDER BY m.created_at DESC LIMIT 100`).all(like,like,like,like))});
 app.post('/api/media/:id/report',auth,(req,res)=>{const reason=String(req.body?.reason||'').trim();if(!reason)return res.status(400).json({error:'Impamvu irakenewe'});const m=db.prepare('SELECT id FROM media WHERE id=?').get(req.params.id);if(!m)return res.status(404).json({error:'Content ntibonetse'});db.prepare("INSERT INTO reports(media_id,user_id,reason,status) VALUES(?,?,?,'open')").run(req.params.id,req.user.id,reason.slice(0,500));res.json({ok:true});});
 app.post('/api/feed/:id/report',auth,(req,res)=>{const reason=String(req.body?.reason||'').trim();if(!reason)return res.status(400).json({error:'Impamvu irakenewe'});const post=db.prepare('SELECT id FROM posts WHERE id=?').get(req.params.id);if(!post)return res.status(404).json({error:'Post ntibonetse'});db.prepare("INSERT INTO reports(post_id,user_id,reason,status) VALUES(?,?,?,'open')").run(req.params.id,req.user.id,reason.slice(0,500));res.json({ok:true});});
 app.get('/api/admin/reports',auth,admin,(req,res)=>res.json(db.prepare("SELECT r.*,m.title media_title,p.text post_text,u.name reporter FROM reports r LEFT JOIN media m ON m.id=r.media_id LEFT JOIN posts p ON p.id=r.post_id JOIN users u ON u.id=r.user_id ORDER BY CASE r.status WHEN 'open' THEN 0 ELSE 1 END,r.created_at DESC").all()));
@@ -1004,20 +206,10 @@ app.get('/api/admin/users',auth,admin,(req,res)=>res.json(db.prepare(`SELECT u.i
 
 // Admin controls: full user/content management and admin password change
 app.get('/api/admin/media',auth,admin,(req,res)=>{
-  const rows=db.prepare(`
-    SELECT m.*,u.name author,u.email author_email,
-      (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id) likes,
-      (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id) comments
-    FROM media m
-    LEFT JOIN users u ON u.id=m.user_id
-    ORDER BY datetime(m.created_at) DESC
-  `).all();
-
-  res.json(rows.map(m=>({
-    ...m,
-    filename:r2Url(m.filename),
-    poster:r2Url(m.poster)
-  })));
+  res.json(db.prepare(`SELECT m.*,u.name author,u.email author_email,
+    (SELECT COUNT(*) FROM likes l WHERE l.media_id=m.id) likes,
+    (SELECT COUNT(*) FROM comments c WHERE c.media_id=m.id) comments
+    FROM media m LEFT JOIN users u ON u.id=m.user_id ORDER BY datetime(m.created_at) DESC`).all());
 });
 app.patch('/api/admin/users/:id/disabled',auth,admin,(req,res)=>{const id=Number(req.params.id),disabled=req.body?.disabled?1:0;if(id===req.user.id&&disabled)return res.status(400).json({error:'Ntushobora kwihagarika konti yawe uri gukoresha admin'});const r=db.prepare('UPDATE users SET disabled=? WHERE id=?').run(disabled,id);if(!r.changes)return res.status(404).json({error:'User ntabonetse'});res.json({ok:true,disabled:!!disabled})});
 app.patch('/api/admin/users/:id/role',auth,admin,(req,res)=>{
@@ -1027,7 +219,7 @@ app.patch('/api/admin/users/:id/role',auth,admin,(req,res)=>{
   db.prepare('UPDATE users SET role=? WHERE id=?').run(role,id);
   res.json({ok:true});
 });
-app.delete('/api/admin/users/:id',auth,admin,async(req,res)=>{
+app.delete('/api/admin/users/:id',auth,admin,(req,res)=>{
   const id=Number(req.params.id);
   if(id===req.user.id) return res.status(400).json({error:'Ntushobora gusiba konti yawe uri gukoresha admin'});
   const u=db.prepare('SELECT id FROM users WHERE id=?').get(id);
@@ -1040,17 +232,8 @@ app.delete('/api/admin/users/:id',auth,admin,async(req,res)=>{
   db.prepare('DELETE FROM reports WHERE user_id=?').run(id);
   db.prepare('DELETE FROM posts WHERE user_id=?').run(id);
   db.prepare('DELETE FROM live_rooms WHERE host_id=?').run(id);
-  const files=db.prepare(
-  'SELECT filename,poster FROM media WHERE user_id=?'
-).all(id);
-
-for(const f of files){
-  await deleteMediaFile(f.filename);
-
-  if(f.poster){
-    await deleteMediaFile(f.poster);
-  }
-}
+  const files=db.prepare('SELECT filename,poster FROM media WHERE user_id=?').all(id);
+  for(const f of files){removeFile(f.filename);removeFile(f.poster)}
   db.prepare('DELETE FROM media WHERE user_id=?').run(id);
   db.prepare('DELETE FROM users WHERE id=?').run(id);
   res.json({ok:true});
@@ -1067,21 +250,5 @@ app.patch('/api/admin/password',auth,admin,(req,res)=>{
 app.get('/robots.txt',(req,res)=>{res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /uploads/\nSitemap: /sitemap.xml\n`)});
 app.get('/sitemap.xml',(req,res)=>{const base=(process.env.SITE_URL||(`${req.protocol}://${req.get('host')}`)).replace(/\/$/,'');const rows=['/','/films','/videos','/music','/photos','/sports','/latest','/trending','/popular','/about','/contact','/privacy','/terms','/copyright','/content-policy'];const media=db.prepare("SELECT id,updated_at,created_at FROM media WHERE status='published' ORDER BY datetime(updated_at) DESC LIMIT 5000").all();const urls=rows.map(x=>`<url><loc>${base}${x}</loc></url>`).concat(media.map(x=>`<url><loc>${base}/media/${x.id}</loc><lastmod>${new Date(x.updated_at||x.created_at).toISOString()}</lastmod></url>`));res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join('')}</urlset>`)});
 app.get('/ads.txt',(req,res)=>res.type('text/plain').send('# MEDIA RWANDA - replace this comment with your real Google AdSense seller line after approval. Do not invent a publisher ID.\n'));
-app.use((req,res)=>{
-  if(req.path.startsWith('/api/')){
-    return res.status(404).json({error:'API route not found'});
-  }
-
-  const indexFile = path.join(ROOT,'index.html');
-
-  if(!fs.existsSync(indexFile)){
-    return res.status(500).send('Rwanda Vibe Media: index.html ntibonetse.');
-  }
-
-  res.sendFile(indexFile);
-});
-
-app.listen(PORT,()=>{
-  console.log(`MEDIA RWANDA running at http://localhost:${PORT}`);
-});
-
+app.use((req,res)=>{if(req.path.startsWith('/api/'))return res.status(404).json({error:'API route not found'});res.sendFile(path.join(ROOT,'public','index.html'))});
+app.listen(PORT,()=>console.log(`MEDIA RWANDA running at http://localhost:${PORT}`));
