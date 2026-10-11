@@ -386,13 +386,17 @@ function uploadPage(){
 
         <label class="fileBox">
           📁 Hitamo Video / Audio / Photo
-          <input
-            name="file"
-            id="uploadFile"
-            type="file"
-            required
-            onchange="showUploadFileName(this)"
-          >
+          
+<input
+  name="file"
+  id="uploadFile"
+  type="file"
+  accept="video/*,image/*,audio/*"
+  required
+  onchange="showUploadFileName(this); previewSelectedMedia(this)"
+>
+<div id="mediaAutoPreview" style="margin-top:12px"></div>
+
           <small id="uploadFileName" class="muted">
             Nta file wahisemo
           </small>
@@ -461,6 +465,14 @@ async function doUpload(e){
 
   try{
     const fd=new FormData(form);
+    
+const posterInput = form.querySelector('input[name="poster"]');
+const manualPoster = posterInput?.files?.[0];
+
+if (!manualPoster && autoPosterBlob) {
+  fd.append('poster', autoPosterBlob, 'auto-thumbnail.jpg');
+}
+
 
     const file=fd.get('file');
 
@@ -491,6 +503,101 @@ async function doUpload(e){
     }
   }
 }
+
+
+let autoPosterBlob = null;
+
+function previewSelectedMedia(input) {
+  const file = input.files?.[0];
+  const preview = document.getElementById('mediaAutoPreview');
+
+  autoPosterBlob = null;
+  if (!preview) return;
+
+  if (!file) {
+    preview.innerHTML = '';
+    return;
+  }
+
+  const url = URL.createObjectURL(file);
+
+  if (file.type.startsWith('image/')) {
+    preview.innerHTML = `
+      <p class="muted">🖼️ Preview y'ifoto</p>
+      <img
+        src="${url}"
+        alt="Photo preview"
+        style="width:100%;max-width:420px;max-height:280px;object-fit:contain;border-radius:12px"
+      >
+    `;
+    return;
+  }
+
+  if (!file.type.startsWith('video/')) {
+    preview.innerHTML = '';
+    return;
+  }
+
+  preview.innerHTML = `
+    <p class="muted">🎬 Video preview — turimo gukora thumbnail...</p>
+    <video
+      id="uploadVideoPreview"
+      src="${url}"
+      controls
+      muted
+      playsinline
+      preload="metadata"
+      style="width:100%;max-width:420px;max-height:280px;background:#000;border-radius:12px"
+    ></video>
+    <div id="thumbnailStatus" class="muted"></div>
+  `;
+
+  const video = document.getElementById('uploadVideoPreview');
+
+  video.addEventListener('loadedmetadata', () => {
+    try {
+      video.currentTime = Math.min(1, Math.max(0, video.duration / 2));
+    } catch (err) {
+      console.warn('Video preview:', err);
+    }
+  }, { once: true });
+
+  video.addEventListener('seeked', () => {
+    try {
+      if (!video.videoWidth || !video.videoHeight) {
+        throw new Error('Video frame ntibonetse.');
+      }
+
+      const canvas = document.createElement('canvas');
+      const scale = Math.min(1, 1280 / video.videoWidth);
+
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      canvas.toBlob(blob => {
+        if (blob) {
+          autoPosterBlob = blob;
+
+          const status = document.getElementById('thumbnailStatus');
+          if (status) {
+            status.textContent = '✅ Thumbnail yakozwe mu buryo bwikora.';
+          }
+        }
+      }, 'image/jpeg', 0.85);
+    } catch (err) {
+      console.warn('Thumbnail generation failed:', err);
+      const status = document.getElementById('thumbnailStatus');
+      if (status) {
+        status.textContent =
+          'Thumbnail ntiyakozwe. Gerageza indi video format.';
+      }
+    }
+  }, { once: true });
+}
+
 async function social(){const posts=await api('/api/feed');shell(`<div class="pageTitle"><div><span class="eyebrow">FACEBOOK-STYLE</span><h1>● Social Feed</h1><p class="muted">Sangiza abantu ibyo ukunda.</p></div>${user?'<button class="bigBtn" onclick="newPost()">＋ Post</button>':''}</div><div class="feed">${posts.map(postCard).join('')||'<div class="empty">Nta post irimo. Ba uwa mbere!</div>'}</div>`);location.hash='social'}
 function postCard(p){
   let m=p.media_filename
