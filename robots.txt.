@@ -1,6 +1,8 @@
 ```txt
 User-agent: *
 Allow: /
+Disallow: /api/
+Disallow: /uploads/
 
 Sitemap: https://rwandavibem.com/sitemap.xml
 ```
