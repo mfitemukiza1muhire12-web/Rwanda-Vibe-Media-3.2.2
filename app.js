@@ -2,34 +2,40 @@ const app=document.getElementById('app');
 let token=localStorage.getItem('mr_token')||'',user=null,media=[],query='';
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 
-function mediaUrl(value){
-  if(!value) return '';
 
-  let s = String(value).trim();
+function mediaUrl(value) {
+  if (!value) return '';
 
-  // URL yuzuye
-  if(/^https?:\/\//i.test(s)){
+  const s = String(value).trim();
+
+  // URL yuzuye: koresha uko iri
+  if (/^https?:\/\//i.test(s)) {
     return s;
   }
 
-  // Local uploads
-  if(s.startsWith('/uploads/')){
+  // Fayili ziri kuri Render Persistent Disk
+  if (s.startsWith('/uploads/')) {
     return s;
   }
 
-  // R2 public domain
-  const publicUrl = 'https://media.rwandavibem.com';
-
-  // Kuraho slash ziri imbere
-  s = s.replace(/^\/+/, '');
-
-  // Niba database yarabitse /uploads/ nta mpamvu yo kuyongera
-  if(s.startsWith('uploads/')){
+  if (s.startsWith('uploads/')) {
     return '/' + s;
   }
 
-  return `${publicUrl}/${s}`;
+  // Fayili nshya zibitswe muri /uploads
+  // Database ibitse izina rya fayili gusa
+  if (!s.includes('/')) {
+    return '/uploads/' + encodeURIComponent(s);
+  }
+
+  // Fayili za kera zishobora kuba ziri kuri R2
+  return 'https://media.rwandavibem.com/' +
+    s.replace(/^\/+/, '')
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/');
 }
+
 async function api(url,opt={}){opt.headers=opt.headers||{};if(token)opt.headers.Authorization='Bearer '+token;const r=await fetch(url,opt);const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Habaye ikibazo');return d}
 function side(id,ico,label){return `<button class="navItem ${location.hash==='#'+id?'active':''}" onclick="page('${id}')"><b>${ico}</b><span>${label}</span></button>`}
 
