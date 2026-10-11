@@ -9,9 +9,30 @@ const {DatabaseSync}=require('node:sqlite');
 const app=express();
 const PORT=Number(process.env.PORT||3000);
 const SECRET=process.env.JWT_SECRET||'MEDIA-RWANDA-change-this-secret-in-production';
-const ROOT=__dirname;
-const UP=path.join(ROOT,'uploads');
-fs.mkdirSync(UP,{recursive:true});
+
+const ROOT = __dirname;
+const OLD_UP = path.join(ROOT, 'uploads');
+const UP = '/uploads';
+
+fs.mkdirSync(UP, { recursive: true });
+
+if (path.resolve(OLD_UP) !== path.resolve(UP) && fs.existsSync(OLD_UP)) {
+  for (const entry of fs.readdirSync(OLD_UP, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+
+    const source = path.join(OLD_UP, entry.name);
+    const destination = path.join(UP, entry.name);
+
+    if (!fs.existsSync(destination)) {
+      try {
+        fs.copyFileSync(source, destination);
+        console.log('Migrated upload:', entry.name);
+      } catch (err) {
+        console.error('Upload migration failed:', entry.name, err.message);
+      }
+    }
+  }
+}
 
 const db=new DatabaseSync(path.join(ROOT,'media-rwanda.db'));
 db.exec(`
@@ -62,8 +83,14 @@ if(!db.prepare('SELECT id FROM users WHERE email=?').get('admin@mediarwanda.com'
 
 app.use(express.json({limit:'3mb'}));
 app.use(express.urlencoded({extended:true}));
+
+app.use('/uploads', express.static(UP, {
+  maxAge: '1d',
+  acceptRanges: true
+}));
+
 app.use(express.static(ROOT));
-app.use('/uploads',express.static(UP,{maxAge:'1d'}));
+
 
 const storage=multer.diskStorage({destination:(_,__,cb)=>cb(null,UP),filename:(_,file,cb)=>{
   const ext=path.extname(file.originalname).toLowerCase();
